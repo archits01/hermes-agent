@@ -670,7 +670,7 @@ export const host = {
     const bridge = window.hermesDesktop?.connections
 
     if (!bridge) {
-      throw new Error('This Desktop build has no connection registry. Update OpenComputer Desktop.')
+      throw new Error('This Desktop build has no connection registry. Update Open Computer Desktop.')
     }
 
     const registryPayload = await bridge.list()
@@ -687,7 +687,7 @@ export const host = {
     const roster = window.hermesDesktop?.getAgentRoster
 
     if (!roster) {
-      throw new Error('This Desktop build cannot enumerate multi-source agents. Update OpenComputer Desktop.')
+      throw new Error('This Desktop build cannot enumerate multi-source agents. Update Open Computer Desktop.')
     }
 
     return roster()
@@ -1062,7 +1062,7 @@ export const host = {
       const openTab = $newSessionTabAction.get()
 
       if (!openTab) {
-        notify({ kind: 'error', message: 'Update OpenComputer Desktop to open another Bot chat.' })
+        notify({ kind: 'error', message: 'Update Open Computer Desktop to open another Bot chat.' })
 
         return
       }
@@ -1107,7 +1107,7 @@ export const host = {
     const getProfileRoutes = desktop?.getProfileRoutes
 
     if (!getProfileRoutes) {
-      throw new Error('OpenComputer Desktop connection routing unavailable')
+      throw new Error('Open Computer Desktop connection routing unavailable')
     }
 
     let profiles = $profiles.get()
@@ -1138,7 +1138,7 @@ export const host = {
     const gateway = $gateway.get()
 
     if (!gateway) {
-      throw new Error('OpenComputer gateway unavailable')
+      throw new Error('Open Computer gateway unavailable')
     }
 
     return gateway.request<T>(method, params)
@@ -1399,3 +1399,20 @@ export { atom, computed } from 'nanostores'
 /** Markdown renderer (same pipeline core chat surfaces use) so plugins render
  *  message text as a preview instead of raw Markdown source. */
 export { Streamdown } from 'streamdown'
+
+// Plugin-facing UI/state contracts. Keep these re-exports here so bundled
+// plugins and runtime-fetched plugins resolve through the same SDK barrel.
+export { CHAT_EMPTY_AREA, type ChatEmptyContribution, type ChatEmptyProps } from '@/lib/chat-empty'
+export { translateNow } from '@/i18n'
+export { Wordmark } from '@/components/chat/wordmark'
+export { PanelEmpty } from '@/app/overlays/panel'
+export { RowButton } from '@/components/ui/row-button'
+export { LruCache } from '@/lib/lru-cache'
+export { ackStoredSessionId, forgetSessionUnread, markSessionUnreadFinished } from '@/store/session-unread'
+export { DisclosureCaret } from '@/components/ui/disclosure-caret'
+export { SessionStatusDot } from '@/app/chat/session-status-dot'
+export { SidebarRowLead } from '@/app/chat/sidebar/chrome'
+export { ConnectionGlyph } from '@/app/chat/sidebar/connection-glyph'
+export { ColorSwatches } from '@/components/ui/color-swatches'
+export { PROFILE_SWATCHES, profileColorSoft } from '@/lib/profile-color'
+export { surfaceModelSwitchConfirm } from '@/lib/guarded-model-switch'

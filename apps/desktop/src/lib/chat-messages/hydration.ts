@@ -14,6 +14,7 @@ import {
   withUniqueToolCallIds
 } from './tool-parts'
 import type { ChatMessage, ChatMessagePart } from './types'
+import { collapseDuplicateAssistantReplies } from './assistant-replies'
 
 const ATTACHED_CONTEXT_MARKER_RE = /(?:^|\n)--- Attached Context ---\s*\n/
 const CONTEXT_WARNINGS_MARKER_RE = /(?:^|\n)--- Context Warnings ---[\s\S]*$/
@@ -316,9 +317,9 @@ export function toChatMessages(messages: SessionMessage[]): ChatMessage[] {
       : message
   )
 
-  return withUniqueToolCallIds(
+  return collapseDuplicateAssistantReplies(withUniqueToolCallIds(
     withoutGeneratedImageEchoes.filter(
       m => chatMessageText(m).trim() || m.parts.some(part => part.type !== 'text') || m.attachmentRefs?.length
     )
-  )
+  ))
 }
