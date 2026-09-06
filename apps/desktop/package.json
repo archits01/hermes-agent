@@ -1,6 +1,6 @@
 {
   "name": "hermes",
-  "productName": "OpenComputer",
+  "productName": "Open Computer",
   "private": true,
   "version": "0.17.0",
   "description": "Native desktop shell for Hermes Agent.",
@@ -189,11 +189,11 @@
   "build": {
     "electronVersion": "40.10.2",
     "appId": "com.nousresearch.hermes",
-    "productName": "OpenComputer",
+    "productName": "Open Computer",
     "executableName": "OpenComputer",
     "protocols": [
       {
-        "name": "OpenComputer Protocol",
+        "name": "Open Computer Protocol",
         "schemes": [
           "hermes"
         ]
@@ -250,12 +250,12 @@
       "entitlements": "electron/entitlements.mac.plist",
       "entitlementsInherit": "electron/entitlements.mac.inherit.plist",
       "extendInfo": {
-        "CFBundleDisplayName": "OpenComputer",
+        "CFBundleDisplayName": "Open Computer",
         "CFBundleExecutable": "OpenComputer",
-        "CFBundleName": "OpenComputer",
-        "NSAudioCaptureUsageDescription": "OpenComputer uses audio capture for voice conversations.",
-        "NSCameraUsageDescription": "OpenComputer uses the camera when a plugin or feature you enable requests it.",
-        "NSMicrophoneUsageDescription": "OpenComputer uses the microphone for voice input and voice conversations."
+        "CFBundleName": "Open Computer",
+        "NSAudioCaptureUsageDescription": "Open Computer uses audio capture for voice conversations.",
+        "NSCameraUsageDescription": "Open Computer uses the camera when a plugin or feature you enable requests it.",
+        "NSMicrophoneUsageDescription": "Open Computer uses the microphone for voice input and voice conversations."
       },
       "gatekeeperAssess": false,
       "hardenedRuntime": true,
@@ -265,7 +265,7 @@
       ]
     },
     "dmg": {
-      "title": "Install OpenComputer",
+      "title": "Install Open Computer",
       "backgroundColor": "#f5f5f7",
       "iconSize": 96,
       "window": {
@@ -287,7 +287,7 @@
       ]
     },
     "win": {
-      "legalTrademarks": "OpenComputer",
+      "legalTrademarks": "Open Computer",
       "target": [
         "nsis",
         "msi"
@@ -297,7 +297,7 @@
     "linux": {
       "category": "Development",
       "maintainer": "Nous Research <support@nousresearch.com>",
-      "synopsis": "Native desktop shell for OpenComputer.",
+      "synopsis": "Native desktop shell for Open Computer.",
       "target": [
         "AppImage",
         "deb",
@@ -308,9 +308,10 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "perMachine": false,
-      "shortcutName": "OpenComputer",
-      "uninstallDisplayName": "OpenComputer",
+      "shortcutName": "Open Computer",
+      "uninstallDisplayName": "Open Computer",
       "warningsAsErrors": false
-    }
+    },
+    "legalTrademarks": "Open Computer"
   }
 }
