@@ -4083,25 +4083,25 @@ def _apply_catalog_provider_policy(
         if slug == "opencode-free" and included:
             try:
                 from hermes_cli.models import (
-                    get_verified_opencode_free_model_ids,
-                    has_fresh_verified_opencode_free_catalog,
+                    get_opencode_free_picker_model_sets,
                 )
 
-                if not has_fresh_verified_opencode_free_catalog():
-                    continue
-                allowed = {
-                    model.lower()
-                    for model in get_verified_opencode_free_model_ids()
-                }
+                verified_ids, pending_ids = get_opencode_free_picker_model_sets()
+                allowed = {model.lower() for model in verified_ids}
                 verified_models = [
                     model for model in (original.get("models") or [])
                     if str(model).lower() in allowed
                 ]
-                if not verified_models:
+                if not verified_models and not pending_ids:
                     continue
                 original = dict(original)
                 original["models"] = verified_models
                 original["total_models"] = len(verified_models)
+                if pending_ids:
+                    original["discovered_models"] = pending_ids
+                    original["discovery_warning"] = (
+                        "Advertised by OpenCode, but not currently verified by a live probe; disabled until the daily check passes."
+                    )
             except Exception:
                 continue
         if slug not in free_only:

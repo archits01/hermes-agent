@@ -367,6 +367,9 @@ export function ModelCatalogMenu({
         <div className={cn('max-h-[max(150px,30dvh)] overflow-y-auto py-0.5', quietRows)} ref={listRef}>
           {groups.map(group => {
             const slug = group.provider.slug
+            const pendingModels = (group.provider.discovered_models ?? []).filter(model =>
+              !q || `${model} ${group.provider.name} ${group.provider.slug}`.toLowerCase().includes(q)
+            )
 
             // Collapsed when the user stored it (and not while searching, which
             // spans every model regardless of collapse state).
@@ -477,6 +480,28 @@ export function ModelCatalogMenu({
                       </DropdownMenuSub>
                     )
                   })}
+                {!collapsed &&
+                  pendingModels.map(model => (
+                    <DropdownMenuItem
+                      className="flex items-center gap-2 pl-6 font-mono text-(--ui-text-tertiary) opacity-60"
+                      disabled
+                      key={`${group.provider.slug}:discovered:${model}`}
+                      onSelect={event => event.preventDefault()}
+                      textValue={`${group.provider.name} ${model}`}
+                    >
+                      <span className="min-w-0 flex-1 truncate">
+                        <HighlightMatches query={search} text={model} />
+                      </span>
+                      <span className="shrink-0 text-[0.6rem] uppercase tracking-wide opacity-90">
+                        Not verified
+                      </span>
+                    </DropdownMenuItem>
+                  ))}
+                {!collapsed && pendingModels.length ? (
+                  <div className="px-6 pb-1 pt-0.5 text-[0.62rem] leading-relaxed text-muted-foreground">
+                    {group.provider.discovery_warning ?? 'Discovered models stay disabled until a live probe verifies them.'}
+                  </div>
+                ) : null}
               </DropdownMenuGroup>
             )
           })}
@@ -545,8 +570,11 @@ function groupModels(
 
   for (const provider of providers) {
     const allFamilies = collapseModelFamilies(provider.models ?? [])
+    const discoveredModels = (provider.discovered_models ?? []).filter(model =>
+      !q || `${model} ${provider.name} ${provider.slug}`.toLowerCase().includes(q)
+    )
 
-    if (allFamilies.length === 0) {
+    if (allFamilies.length === 0 && discoveredModels.length === 0) {
       continue
     }
 
@@ -579,7 +607,7 @@ function groupModels(
 
     const families = allFamilies.filter(family => shown.has(family.id) || family.id === activeId)
 
-    if (families.length > 0) {
+    if (families.length > 0 || discoveredModels.length > 0) {
       groups.push({ families, provider })
     }
   }

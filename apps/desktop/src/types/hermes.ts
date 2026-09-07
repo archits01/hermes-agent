@@ -421,6 +421,13 @@ export interface ModelOptionProvider {
   free_tier?: boolean
   /** Nous only: paid models a free-tier user cannot select (shown disabled). */
   unavailable_models?: string[]
+  /**
+   * Live provider-discovered models that are not currently probe-verified.
+   * These are presentation-only rows and must remain disabled in pickers.
+   */
+  discovered_models?: string[]
+  /** Human-readable explanation for why discovered rows are disabled. */
+  discovery_warning?: string
   /** Per-model option support, keyed by model id (present when the picker
    *  requested capabilities). Lets the UI gate fast/reasoning controls. */
   capabilities?: Record<string, ModelCapabilities>

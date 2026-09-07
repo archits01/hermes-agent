@@ -435,17 +435,10 @@ def _managed_opencode_free_policy(rows: list[dict], included_providers: list[str
     if not included:
         return rows
     try:
-        from hermes_cli.models import (
-            get_verified_opencode_free_model_ids,
-            has_fresh_verified_opencode_free_catalog,
-        )
+        from hermes_cli.models import get_opencode_free_picker_model_sets
 
-        if not has_fresh_verified_opencode_free_catalog():
-            return [
-                row for row in rows
-                if str(row.get("slug") or "").strip().lower() != "opencode-free"
-            ]
-        allowed = {model.lower() for model in get_verified_opencode_free_model_ids()}
+        verified_ids, pending_ids = get_opencode_free_picker_model_sets()
+        allowed = {model.lower() for model in verified_ids}
     except Exception:
         return [
             row for row in rows
@@ -461,11 +454,16 @@ def _managed_opencode_free_policy(rows: list[dict], included_providers: list[str
             model for model in (original.get("models") or [])
             if str(model).lower() in allowed
         ]
-        if not models:
+        if not models and not pending_ids:
             continue
         row = dict(original)
         row["models"] = models
         row["total_models"] = len(models)
+        if pending_ids:
+            row["discovered_models"] = pending_ids
+            row["discovery_warning"] = (
+                "Advertised by OpenCode, but not currently verified by a live probe; disabled until the daily check passes."
+            )
         kept.append(row)
     return kept
 

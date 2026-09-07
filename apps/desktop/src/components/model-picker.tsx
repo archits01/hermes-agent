@@ -184,15 +184,16 @@ function ModelResults({
   // Only configured providers (those with curated models) are selectable
   // here. Switching to a NOT-yet-configured provider goes through the
   // "Add provider" footer button, which opens the full onboarding selector.
-  const configured = providers.filter(p => (p.models ?? []).length > 0)
+  const configured = providers.filter(p => (p.models ?? []).length > 0 || (p.discovered_models ?? []).length > 0)
 
   return (
     <>
       {configured.map(provider => {
         // Preserve the backend's curated order — filter in place, no re-sort.
         const models = (provider.models ?? []).filter(m => matches(provider, m))
+        const discovered = (provider.discovered_models ?? []).filter(m => matches(provider, m))
 
-        if (models.length === 0) {
+        if (models.length === 0 && discovered.length === 0) {
           return null
         }
 
@@ -243,6 +244,29 @@ function ModelResults({
               <div className="px-6 pb-2 pt-1 text-[0.62rem] leading-relaxed text-muted-foreground">
                 {copy.proNeedsSubscription}
               </div>
+            )}
+            {discovered.length > 0 && (
+              <>
+                {discovered.map(model => (
+                  <CommandItem
+                    className="flex cursor-not-allowed items-center gap-2 pl-6 font-mono text-muted-foreground opacity-60"
+                    disabled
+                    key={`${provider.slug}:discovered:${model}`}
+                    onSelect={event => event.preventDefault()}
+                    value={`${provider.slug}:discovered:${model}`}
+                  >
+                    <span className="min-w-0 flex-1 truncate">
+                      <HighlightMatches query={search} text={model} />
+                    </span>
+                    <span className="shrink-0 text-[0.6rem] uppercase tracking-wide opacity-90">
+                      Not verified
+                    </span>
+                  </CommandItem>
+                ))}
+                <div className="px-6 pb-2 pt-1 text-[0.62rem] leading-relaxed text-muted-foreground">
+                  {provider.discovery_warning ?? 'Discovered models stay disabled until a live probe verifies them.'}
+                </div>
+              </>
             )}
           </CommandGroup>
         )

@@ -737,6 +737,9 @@ _PROVIDER_MODELS["ai-gateway"] = [mid for mid, _ in VERCEL_AI_GATEWAY_MODELS]
 OPENCODE_FREE_CATALOG_VERSION = 1
 OPENCODE_FREE_CATALOG_MAX_AGE_SECONDS = 48 * 60 * 60
 OPENCODE_FREE_CATALOG_MAX_MODELS = 64
+OPENCODE_FREE_DISCOVERY_VERSION = 1
+OPENCODE_FREE_DISCOVERY_MAX_AGE_SECONDS = 48 * 60 * 60
+OPENCODE_FREE_DISCOVERY_MAX_MODELS = 64
 _OPENCODE_FREE_STATIC_MODELS: tuple[str, ...] = tuple(
     _PROVIDER_MODELS["opencode-free"]
 )
@@ -748,6 +751,19 @@ def opencode_free_catalog_path() -> Path:
     from hermes_constants import get_hermes_home
 
     return get_hermes_home() / "opencode_free_model_catalog.json"
+
+
+def opencode_free_discovery_path() -> Path:
+    """Return this profile's short-lived advertised free-model snapshot.
+
+    Discovery is deliberately separate from the verified catalog: appearing
+    in OpenCode's ``/models`` response is not proof that the relay will serve
+    the model to Hermes. The picker may display this snapshot as disabled,
+    but runtime model selection must never use it as executable proof.
+    """
+    from hermes_constants import get_hermes_home
+
+    return get_hermes_home() / "opencode_free_model_discovery.json"
 
 
 def _valid_opencode_free_model_id(value: Any) -> bool:
@@ -811,6 +827,127 @@ def get_verified_opencode_free_model_ids(*, now: Optional[float] = None) -> list
     """Return current anonymous OpenCode models, else the static safe fallback."""
     verified = _read_opencode_free_catalog(now=now)
     return verified if verified is not None else list(_OPENCODE_FREE_STATIC_MODELS)
+
+
+def _read_opencode_free_discovery(
+    *, now: Optional[float] = None,
+) -> Optional[list[str]]:
+    """Read the bounded-age live advertised OpenCode free-model snapshot."""
+    try:
+        with opencode_free_discovery_path().open(encoding="utf-8") as handle:
+            payload = json.load(handle)
+        if (
+            not isinstance(payload, dict)
+            or payload.get("version") != OPENCODE_FREE_DISCOVERY_VERSION
+        ):
+            return None
+        discovered_at = payload.get("discovered_at")
+        if (
+            not isinstance(discovered_at, (int, float))
+            or isinstance(discovered_at, bool)
+            or discovered_at <= 0
+        ):
+            return None
+        current_time = time.time() if now is None else now
+        if (
+            current_time < discovered_at
+            or current_time - discovered_at > OPENCODE_FREE_DISCOVERY_MAX_AGE_SECONDS
+        ):
+            return None
+        raw_models = payload.get("models")
+        if (
+            not isinstance(raw_models, list)
+            or len(raw_models) > OPENCODE_FREE_DISCOVERY_MAX_MODELS
+        ):
+            return None
+        models: list[str] = []
+        seen: set[str] = set()
+        for item in raw_models:
+            model_id = item.get("id") if isinstance(item, dict) else None
+            if not _valid_opencode_free_model_id(model_id):
+                return None
+            if not is_opencode_zen_free_model(model_id):
+                return None
+            key = model_id.lower()
+            if key not in seen:
+                models.append(model_id)
+                seen.add(key)
+        return models
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return None
+
+
+def get_discovered_opencode_free_model_ids(*, now: Optional[float] = None) -> list[str]:
+    """Return currently advertised free IDs for disabled picker rows only."""
+    return _read_opencode_free_discovery(now=now) or []
+
+
+def get_opencode_free_picker_model_sets(
+    *, now: Optional[float] = None,
+) -> tuple[list[str], list[str]]:
+    """Return ``(verified, pending)`` IDs for the managed model picker.
+
+    ``pending`` is presentation-only. It must remain disabled until the
+    authenticated daily probe promotes it into the verified catalog.
+    """
+    discovered = get_discovered_opencode_free_model_ids(now=now)
+    verified = (
+        get_verified_opencode_free_model_ids(now=now)
+        if has_fresh_verified_opencode_free_catalog(now=now)
+        else []
+    )
+    verified_keys = {model.lower() for model in verified}
+    pending = [model for model in discovered if model.lower() not in verified_keys]
+    return verified, pending
+
+
+def write_opencode_free_discovery_catalog(
+    models: list[str],
+    *,
+    discovered_at: Optional[float] = None,
+    source: str = "https://opencode.ai/zen/v1",
+) -> None:
+    """Atomically store live advertised free IDs for disabled UI rows."""
+    timestamp = time.time() if discovered_at is None else discovered_at
+    if (
+        not isinstance(timestamp, (int, float))
+        or isinstance(timestamp, bool)
+        or timestamp <= 0
+    ):
+        raise ValueError("discovered_at must be a positive timestamp")
+    unique: list[str] = []
+    seen: set[str] = set()
+    for model_id in models:
+        if (
+            not _valid_opencode_free_model_id(model_id)
+            or not is_opencode_zen_free_model(model_id)
+        ):
+            raise ValueError("invalid OpenCode free discovery model id")
+        key = model_id.lower()
+        if key not in seen:
+            unique.append(model_id)
+            seen.add(key)
+        if len(unique) > OPENCODE_FREE_DISCOVERY_MAX_MODELS:
+            raise ValueError("too many OpenCode free discovery models")
+    atomic_json_write(
+        opencode_free_discovery_path(),
+        {
+            "version": OPENCODE_FREE_DISCOVERY_VERSION,
+            "provider": "opencode-free",
+            "discovered_at": timestamp,
+            "source": source,
+            "models": [{"id": model_id} for model_id in unique],
+        },
+        indent=2,
+    )
+
+
+def clear_opencode_free_discovery_catalog() -> None:
+    """Remove an invalid/definitively rejected discovery snapshot."""
+    try:
+        opencode_free_discovery_path().unlink(missing_ok=True)
+    except OSError:
+        return
 
 
 def has_fresh_verified_opencode_free_catalog(*, now: Optional[float] = None) -> bool:

@@ -30,12 +30,14 @@ from hermes_cli.models import (  # noqa: E402
     OPENCODE_FREE_CATALOG_MAX_MODELS,
     _read_opencode_free_catalog,
     _valid_opencode_free_model_id,
+    clear_opencode_free_discovery_catalog,
     clear_verified_opencode_free_catalog,
     get_fresh_opencode_free_catalog_snapshot,
     get_stored_opencode_free_model_ids,
     get_verified_opencode_free_model_ids,
     opencode_model_api_mode,
     opencode_zen_free_headers,
+    write_opencode_free_discovery_catalog,
     write_verified_opencode_free_catalog,
 )
 
@@ -245,10 +247,16 @@ def refresh_catalog(base_url: str = DEFAULT_BASE_URL, *, timeout: float = 10.0) 
             # A malformed or rejected authoritative discovery response proves
             # the old cache cannot remain a managed availability signal.
             clear_verified_opencode_free_catalog()
+            clear_opencode_free_discovery_catalog()
             return {"status": "definitive_discovery_failed", "models": 0}
         return {"status": "unavailable", "models": 0}
 
     candidates = conservative_candidates(discovered)
+    # Keep advertised free IDs visible as disabled picker rows even when a
+    # provider probe rejects them. This is discovery, not runtime proof.
+    write_opencode_free_discovery_catalog(
+        candidates, discovered_at=time.time(), source=normalized_base
+    )
     accepted: list[str] = []
     retained_transient: list[str] = []
     previous_by_key = {model.lower(): model for model in previous}

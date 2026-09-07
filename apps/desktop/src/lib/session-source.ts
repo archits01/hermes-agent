@@ -9,7 +9,9 @@ const SOURCE_LABELS: Record<string, string> = {
   discord: 'Discord',
   email: 'Email',
   gateway: 'Gateway',
+  instagram: 'Instagram',
   kanban: 'Kanban',
+  linkedin: 'LinkedIn',
   local: 'Local',
   matrix: 'Matrix',
   mattermost: 'Mattermost',
@@ -85,12 +87,41 @@ export const MESSAGING_SESSION_SOURCE_IDS = [
 ]
 const MESSAGING_SOURCE_IDS = new Set(MESSAGING_SESSION_SOURCE_IDS)
 
+// These are the LMI channels configured on the VM. Keep their section visible
+// even before the first thread exists; visibility must not depend on history.
+// The platform page remains the source of truth for whether a channel is
+// connected, while the sidebar gives the operator a stable place to find it.
+export const LMI_CONFIGURED_MESSAGING_SOURCE_IDS = ['instagram', 'linkedin', 'whatsapp_unipile', 'telegram'] as const
+
 /** True when a source id is an external messaging platform (gets its own
  *  sidebar section) rather than a local/CLI/desktop session. */
 export function isMessagingSource(source: null | string | undefined): boolean {
   const id = normalizeSessionSource(source)
 
   return id != null && MESSAGING_SOURCE_IDS.has(id)
+}
+
+/**
+ * Merge session-derived and configured platform ids for sidebar sections.
+ * Unknown/local sources are ignored so a malformed row cannot create a fake
+ * messaging section.
+ */
+export function mergeMessagingSourceIds(
+  ...sourceLists: Array<Iterable<null | string | undefined>>
+): string[] {
+  const ids = new Set<string>()
+
+  for (const sourceList of sourceLists) {
+    for (const source of sourceList) {
+      const id = normalizeSessionSource(source)
+
+      if (id && isMessagingSource(id)) {
+        ids.add(id)
+      }
+    }
+  }
+
+  return [...ids]
 }
 
 export function normalizeSessionSource(source: null | string | undefined): string | null {
