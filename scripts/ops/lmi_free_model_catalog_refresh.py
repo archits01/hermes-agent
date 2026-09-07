@@ -15,6 +15,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -46,8 +47,11 @@ MAX_PROBE_CANDIDATES = min(32, OPENCODE_FREE_CATALOG_MAX_MODELS)
 
 
 def _headers() -> dict[str, str]:
-    """Use exactly the keyless runtime identity plus request metadata."""
-    headers = opencode_zen_free_headers()
+    """Use OpenCode auth/session headers when available, else anonymous."""
+    headers = opencode_zen_free_headers(
+        session_id=f"ses_{uuid.uuid4().hex}",
+        request_id=f"req_{uuid.uuid4().hex}",
+    )
     headers.update({
         "Accept": "application/json",
         "Content-Type": "application/json",
@@ -286,7 +290,7 @@ def refresh_catalog(base_url: str = DEFAULT_BASE_URL, *, timeout: float = 10.0) 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
-    parser.add_argument("--timeout", type=float, default=10.0)
+    parser.add_argument("--timeout", type=float, default=45.0)
     args = parser.parse_args(argv)
     if args.timeout <= 0:
         parser.error("--timeout must be positive")
