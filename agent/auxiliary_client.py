@@ -5814,6 +5814,18 @@ def _resolve_fallback_entry(entry: Dict[str, Any]) -> Tuple[Optional[Any], Optio
     model = str(entry.get("model") or "").strip() or None
     if not provider or not model:
         return None, None
+    if provider.lower() in {"opencode-free", "opencode_free", "free"}:
+        try:
+            from hermes_cli.models import has_fresh_verified_opencode_free_catalog
+
+            if not has_fresh_verified_opencode_free_catalog():
+                logger.info(
+                    "Skipping OpenCode Free fallback: no fresh provider verification"
+                )
+                return None, None
+        except Exception:
+            logger.debug("OpenCode Free verification lookup failed", exc_info=True)
+            return None, None
     base_url = str(entry.get("base_url") or "").strip() or None
     api_key = _fallback_entry_api_key(entry)
     api_mode = str(entry.get("api_mode") or entry.get("transport") or "").strip() or None

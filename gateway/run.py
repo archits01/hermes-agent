@@ -3127,6 +3127,15 @@ def _try_resolve_fallback_provider() -> dict | None:
             return None
         for entry in fb_list:
             try:
+                provider_id = str(entry.get("provider") or "").strip().lower()
+                if provider_id in {"opencode-free", "opencode_free", "free"}:
+                    from hermes_cli.models import has_fresh_verified_opencode_free_catalog
+
+                    if not has_fresh_verified_opencode_free_catalog():
+                        logger.info(
+                            "Skipping OpenCode Free fallback: no fresh provider verification"
+                        )
+                        continue
                 from hermes_cli.fallback_config import resolve_entry_api_key
 
                 runtime = resolve_runtime_provider(
