@@ -183,29 +183,6 @@ describe('the active source annotates; other sources append', () => {
     expect(rows.find(row => row.name === 'coder')).toMatchObject({ handle: 'coder', remoteSource: true })
   })
 
-  it('does not surface stale local profiles when the VM is the active primary source', async () => {
-    const rows = await mergedRoster(
-      { profiles: [{ name: 'default' }] },
-      {
-        primaryConnectionId: 'vm-primary',
-        sources: [
-          { connectionId: 'local', kind: 'local', reachable: true },
-          { connectionId: 'vm-primary', kind: 'remote', reachable: true }
-        ],
-        agents: [
-          { connectionId: 'local', connectionKind: 'local', connectionLabel: 'This device', handle: 'finance', profile: 'finance' },
-          { connectionId: 'local', connectionKind: 'local', connectionLabel: 'This device', handle: 'sales', profile: 'sales' },
-          { connectionId: 'vm-primary', connectionKind: 'remote', connectionLabel: 'VM', handle: 'default-vm', profile: 'default' }
-        ]
-      },
-      'vm-primary'
-    )
-
-    expect(rows).toHaveLength(1)
-    expect(rows[0]).toMatchObject({ name: 'default', connectionId: 'vm-primary' })
-    expect(rows.some(row => row.connectionId === 'local')).toBe(false)
-  })
-
   it('never invents a thin row for an active-source profile profiles.list did not return', async () => {
     // An older backend mid-refresh: skip rather than paint a bot that has no
     // rich row behind it.

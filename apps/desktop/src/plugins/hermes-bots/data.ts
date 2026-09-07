@@ -685,26 +685,11 @@ export function useRoster() {
           const previous: RosterRow[] = $lastRoster.get().filter(row => !row?.ghost)
           const merged = mergeMultiSourceRoster(local, union, activeConnectionId, previous)
           const sources = Array.isArray(union?.sources) ? union.sources : []
-          const liveId = String(activeConnectionId || '').trim()
-          const remotePrimaryActive = Boolean(
-            liveId &&
-            liveId !== 'local' &&
-            sources.some(
-              source =>
-                String(source?.connectionId || '').trim() === liveId &&
-                source?.kind !== 'local'
-            )
-          )
-          // A remote VM is the authoritative desktop source. Do not expose
-          // the old local profile store as a second "This device" roster.
-          const visibleSources = remotePrimaryActive
-            ? sources.filter(source => String(source?.connectionId || '').trim() === liveId)
-            : sources
 
           return {
             ...merged,
-            profiles: (merged?.profiles || []).map(row => annotateBotSource(row, visibleSources)),
-            sources: visibleSources,
+            profiles: (merged?.profiles || []).map(row => annotateBotSource(row, sources)),
+            sources,
             fetchedAt: issuedAt
           }
         } catch {
@@ -819,16 +804,6 @@ function mergeMultiSourceRoster(
     }
   }
 
-  const remotePrimaryActive = Boolean(
-    activeId &&
-    activeId !== 'local' &&
-    agents.some(
-      agent =>
-        String(agent?.connectionId || '').trim() === activeId &&
-        agent?.connectionKind !== 'local'
-    )
-  )
-
   const activeByName = new Map<string, RosterRow>()
 
   // Treat the rich list as one row per active-source profile. Clone every
@@ -839,13 +814,6 @@ function mergeMultiSourceRoster(
     const name = String(profile?.name || '').trim()
 
     if (!name || profile?.remoteSource) {
-      continue
-    }
-
-    if (
-      remotePrimaryActive &&
-      (String(profile?.connectionId || '').trim() === 'local' || profile?.connectionKind === 'local')
-    ) {
       continue
     }
 
@@ -872,10 +840,6 @@ function mergeMultiSourceRoster(
     const profile = String(agent?.profile || '').trim()
     const connectionId = String(agent?.connectionId || '').trim()
     const sourceKey = `${connectionId}::${profile || 'default'}`
-
-    if (remotePrimaryActive && connectionId === 'local') {
-      continue
-    }
 
     if (!profile || seenSources.has(sourceKey)) {
       continue

@@ -304,8 +304,26 @@ export function BotsPane() {
 
   const sourceWithSelectedOwner =
     selectionHydrated && rosterHydrated ? rosterWithSelectedOwner(source, sourceSnapshot, selectedRosterKey) : source
+  const activeConnectionKey = String(activeConnectionId || '').trim()
+  const vmPrimaryVisible = Boolean(
+    activeConnectionKey &&
+    activeConnectionKey !== 'local' &&
+    sourceSnapshot.some(
+      sourceItem =>
+        String(sourceItem?.connectionId || '').trim() === activeConnectionKey &&
+        sourceItem?.kind !== 'local'
+    )
+  )
+  // The VM is the authoritative desktop source when its registered remote
+  // primary is active. Keep local profiles available for an explicit local
+  // source, but do not paint that stale store beside the VM bot.
+  const visibleSourceWithSelectedOwner = vmPrimaryVisible
+    ? sourceWithSelectedOwner.filter(
+        row => String(row?.connectionId || '').trim() === activeConnectionKey
+      )
+    : sourceWithSelectedOwner
 
-  const roster = sourceWithSelectedOwner.slice().sort((a, b) => {
+  const roster = visibleSourceWithSelectedOwner.slice().sort((a, b) => {
     const pa = isPinned(a) ? 1 : 0
     const pb = isPinned(b) ? 1 : 0
 
@@ -887,7 +905,7 @@ export function BotsPane() {
             <span>
               {'This will permanently delete the bot '}
               <span className="font-medium text-foreground">{deleting.name}</span>
-              {' and its associated Hermes profile at '}
+              {' and its associated Open Computer profile at '}
               <span className="font-mono text-xs">{deleting.path}</span>. This cannot be undone.
             </span>
           ) : null
