@@ -90,6 +90,8 @@ const ACTIVATION_LEASE_MS = 30_000
 interface GatewayRegistryState {
   config: RegistryConfig | null
   primaryGateway: HermesGateway | null
+  /** Registry source serving the primary socket; null means the local pool. */
+  primaryConnectionId: null | string
   primaryProfile: string
   activeKey: string
   activationEpoch: number
@@ -104,6 +106,7 @@ function createRegistryState(): GatewayRegistryState {
   return {
     config: null,
     primaryGateway: null,
+    primaryConnectionId: null,
     primaryProfile: 'default',
     activeKey: 'default',
     activationEpoch: 0,
@@ -175,8 +178,13 @@ export function emitLocalGatewayEvent(event: GatewayEvent): void {
   g.config?.onEvent(event)
 }
 
-export function setPrimaryGateway(gateway: HermesGateway | null, profile = 'default'): void {
+export function setPrimaryGateway(
+  gateway: HermesGateway | null,
+  profile = 'default',
+  connectionId: null | string = null
+): void {
   g.primaryGateway = gateway
+  g.primaryConnectionId = connectionId?.trim() || null
   g.primaryProfile = normKey(profile)
 }
 
@@ -212,7 +220,10 @@ export function activeGateway(): HermesGateway | null {
  */
 export function activeGatewayConnectionId(): null | string {
   if (g.activeKey === g.primaryProfile) {
-    return null
+    // The primary socket can itself be a registered remote source. Treating
+    // every primary as local makes REST calls (sessions, models, config) land
+    // on the local pool while the WebSocket is connected to the VM.
+    return g.primaryConnectionId === 'local' ? null : g.primaryConnectionId
   }
 
   return g.secondaries.get(g.activeKey)?.connectionId ?? null
@@ -620,7 +631,7 @@ export async function requestGatewayForProfile<T>(
 
   try {
     if (!route.gateway) {
-      throw new Error(`OpenComputer gateway unavailable for profile "${route.key}"`)
+      throw new Error(`Open Computer gateway unavailable for profile "${route.key}"`)
     }
 
     const routedParams = route.scopeProfile ? { ...params, profile: route.key } : params
@@ -658,7 +669,7 @@ export async function requestGatewayForAgent<T>(
   }
 
   if (!window.hermesDesktop?.getConnectionFor) {
-    throw new Error('This Desktop build cannot dial registry connections. Update OpenComputer Desktop.')
+    throw new Error('This Desktop build cannot dial registry connections. Update Open Computer Desktop.')
   }
 
   const entry = g.secondaries.get(scope) ?? createSecondary(key, connectionId)
@@ -721,7 +732,7 @@ export async function openGatewayForAgent(connectionId: null | string, profile: 
   }
 
   if (!window.hermesDesktop?.getConnectionFor) {
-    throw new Error('This Desktop build cannot dial registry connections. Update OpenComputer Desktop.')
+    throw new Error('This Desktop build cannot dial registry connections. Update Open Computer Desktop.')
   }
 
   const entry = g.secondaries.get(scope) ?? createSecondary(profile, connectionId)
@@ -743,7 +754,7 @@ export async function ensureGatewayForAgent(connectionId: null | string, profile
   }
 
   if (!window.hermesDesktop?.getConnectionFor) {
-    throw new Error('This Desktop build cannot dial registry connections. Update OpenComputer Desktop.')
+    throw new Error('This Desktop build cannot dial registry connections. Update Open Computer Desktop.')
   }
 
   const activationEpoch = beginGatewayActivation()

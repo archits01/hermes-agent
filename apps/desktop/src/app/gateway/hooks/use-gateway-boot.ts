@@ -140,8 +140,13 @@ export function useGatewayBoot({
   useEffect(() => {
     let cancelled = false
     const desktop = window.hermesDesktop
+    // Keep REST/API routing on the same registered source as the primary
+    // WebSocket. Without this, a remote primary could display as ready while
+    // session/model/config REST calls silently hit the local pool.
+    let activePrimaryConnectionId: null | string = null
 
     const publish = (next: HermesConnection | null) => {
+      activePrimaryConnectionId = next ? primaryRuntimeConnectionId(next) : null
       callbacksRef.current.onConnectionReady(next)
       setConnection(next)
     }
@@ -513,7 +518,11 @@ export function useGatewayBoot({
     const gateway = adoptedFromHmr ? survivor!.gateway : new HermesGateway()
 
     callbacksRef.current.onGatewayReady(gateway)
-    setPrimaryGateway(gateway, survivor?.profile ?? normalizeProfileKey($activeGatewayProfile.get()))
+    setPrimaryGateway(
+      gateway,
+      survivor?.profile ?? normalizeProfileKey($activeGatewayProfile.get()),
+      activePrimaryConnectionId
+    )
     // Secondary (background-profile) sockets funnel into the same handler.
     // Record each event's source scope first: registry-tagged events feed the
     // (connectionId, profile) keep-set so two sources exposing the same

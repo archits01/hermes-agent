@@ -9675,6 +9675,13 @@ function configuredRemoteProfileNames() {
 // profile via ?profile=. Cloud counts — it resolves to a remote backend (Q6).
 // Distinct from per-profile overrides — here there's one host for all.
 function globalRemoteActive() {
+  const registry = readDesktopConnectionsRegistry()
+  const primary = registry.connections.find(connection => connection.id === registry.primary)
+
+  if (primary && primary.kind !== 'local') {
+    return true
+  }
+
   if (process.env.HERMES_DESKTOP_REMOTE_URL) {
     return true
   }

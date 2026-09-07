@@ -1,7 +1,9 @@
 import {
   connectionScopeKey,
   modeIsRemoteLike,
+  normalizeRemoteBaseUrl,
   normalizeSshConfig,
+  normalizeRemoteHeaders,
   normAuthMode,
   profileRemoteOverride,
   profileSshOverride
@@ -9,7 +11,7 @@ import {
 import type { ConnectionRegistry } from './connection-registry'
 import { matchingConnectionId, type StoredRoute } from './connection-route-identity'
 
-type RouteSource = 'env' | 'profile' | 'settings'
+type RouteSource = 'env' | 'profile' | 'registry' | 'settings'
 
 interface SshRouteConfig {
   host: string
@@ -115,6 +117,46 @@ export function resolveDesktopRemoteRoute({
     }
 
     return { authMode: 'token', kind: 'remote', source: 'env', token: envToken, url: envUrl }
+  }
+
+  // The v2 connections registry is authoritative when the selected primary
+  // source is remote. Older builds only consulted connection.json here, so a
+  // registry-only VM connection silently fell back to the local backend for
+  // REST/API calls even while the desktop socket was connected remotely.
+  const primary = registry.connections.find(connection => connection.id === registry.primary)
+
+  if (config.mode === 'local' && primary && primary.kind !== 'local') {
+    if (primary.kind === 'ssh') {
+      const ssh = normalizeSshConfig({ mode: 'ssh', ...primary })
+
+      return ssh
+        ? withConnectionId(
+            { kind: 'ssh' as const, source: 'registry' as const, ssh, token: primary.token },
+            primary.id
+          )
+        : null
+    }
+
+    const url = String(primary.url || '').trim()
+
+    if (!url) {
+      return null
+    }
+
+    const kind = primary.kind === 'cloud' ? 'cloud' : 'remote'
+
+    return withConnectionId(
+      {
+        authMode: normAuthMode(primary.authMode),
+        headers: normalizeRemoteHeaders(primary.headers),
+        kind,
+        org: kind === 'cloud' ? String(primary.org || '').trim() || undefined : undefined,
+        source: 'registry' as const,
+        token: primary.token,
+        url: normalizeRemoteBaseUrl(url)
+      },
+      primary.id
+    )
   }
 
   if (config.mode === 'ssh') {

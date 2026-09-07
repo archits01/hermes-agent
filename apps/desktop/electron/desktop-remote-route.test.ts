@@ -235,3 +235,16 @@ test('URL route fails closed for different token, headers, kind, or Cloud org', 
 test('local config without overrides returns null', () => {
   assert.equal(resolveDesktopRemoteRoute({ config: { mode: 'local' }, registry: registry('local', []) }), null)
 })
+
+test('registry primary remote is selected when legacy connection.json is local', () => {
+  const route = resolveDesktopRemoteRoute({
+    config: { mode: 'local' },
+    registry: registry('vm-primary', [
+      { id: 'vm-primary', kind: 'remote', label: 'VM', url: 'https://vm.test', token: tokenA }
+    ])
+  })
+
+  assert.equal(route?.source, 'registry')
+  assert.equal(route?.connectionId, 'vm-primary')
+  assert.equal(route?.kind === 'remote' ? route.url : null, 'https://vm.test')
+})

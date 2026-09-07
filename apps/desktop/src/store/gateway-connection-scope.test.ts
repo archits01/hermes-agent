@@ -41,6 +41,7 @@ vi.mock('@/store/notify-baseline', () => ({ markNativeNotifyBaseline: vi.fn() })
 
 const {
   closeSecondaryGateways,
+  activeGatewayConnectionId,
   configureGatewayRegistry,
   ensureGatewayForAgent,
   openGatewayForAgent,
@@ -82,6 +83,16 @@ afterEach(() => {
   closeSecondaryGateways()
   vi.clearAllMocks()
   delete (window as unknown as { hermesDesktop?: unknown }).hermesDesktop
+})
+
+describe('primary connection REST scope', () => {
+  it('publishes a registered remote primary without treating local as remote', () => {
+    setPrimaryGateway({ connectionState: 'open' } as never, 'default', 'vm-primary')
+    expect(activeGatewayConnectionId()).toBe('vm-primary')
+
+    setPrimaryGateway({ connectionState: 'open' } as never, 'default', 'local')
+    expect(activeGatewayConnectionId()).toBeNull()
+  })
 })
 
 describe('pruneSecondaryGateways with registry-scoped entries', () => {
