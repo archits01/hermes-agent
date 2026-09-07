@@ -18,6 +18,7 @@ import urllib.parse
 import urllib.request
 import urllib.error
 import time
+import uuid
 from difflib import get_close_matches
 from pathlib import Path
 from typing import Any, NamedTuple, Optional, TYPE_CHECKING
@@ -5966,24 +5967,53 @@ def is_opencode_zen_free_model(model_id: Optional[str]) -> bool:
     return bare.endswith("-free") or bare in _OPENCODE_KEYLESS_EXTRA_SLUGS
 
 
-def opencode_zen_free_headers() -> dict:
-    """Client default_headers for anonymous OpenCode Zen free-tier requests.
+def _opencode_auth_key() -> str:
+    """Read the normal OpenCode credential without logging or exposing it."""
+    candidates = []
+    configured = os.environ.get("OPENCODE_AUTH_FILE", "").strip()
+    if configured:
+        candidates.append(Path(configured).expanduser())
+    candidates.extend((Path.home() / ".local/share/opencode/auth.json", Path("/root/.local/share/opencode/auth.json")))
+    seen = set()
+    for path in candidates:
+        key = str(path)
+        if key in seen:
+            continue
+        seen.add(key)
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            entry = payload.get("opencode") or payload.get("opencode-zen") or {}
+            token = str(entry.get("key") or "").strip() if isinstance(entry, dict) else ""
+            if token:
+                return token
+        except (OSError, TypeError, ValueError, json.JSONDecodeError):
+            continue
+    return ""
 
-    ``Authorization: ""`` overrides the OpenAI SDK's ``Bearer <api_key>``
-    header so the placeholder key never reaches the wire — the Zen relay
-    accepts anonymous requests for free models but 401s any unknown bearer.
-    Attribution headers mirror the opencode provider profile.
+
+def opencode_zen_free_headers(*, session_id: Optional[str] = None, request_id: Optional[str] = None) -> dict:
+    """Headers for OpenCode Zen, using the local OpenCode auth when present.
+
+    OpenCode's current relay requires its session/request headers.  When the
+    normal OpenCode credential is absent we retain the anonymous headers, but
+    the verifier and managed picker remain fail-closed until a probe succeeds.
     """
     try:
         from hermes_cli import __version__ as _v
     except Exception:
         _v = "0"
-    return {
-        "Authorization": "",
+    token = _opencode_auth_key()
+    headers = {
+        "Authorization": f"Bearer {token}" if token else "",
         "HTTP-Referer": "https://hermes-agent.nousresearch.com",
         "X-Title": "Hermes Agent",
         "User-Agent": f"HermesAgent/{_v}",
     }
+    if token:
+        headers["x-opencode-session"] = session_id or f"ses_{uuid.uuid4().hex}"
+        headers["x-opencode-request"] = request_id or f"req_{uuid.uuid4().hex}"
+        headers["x-opencode-client"] = "hermes"
+    return headers
 
 
 def opencode_zen_free_runtime(provider_id: Optional[str], model_id: Optional[str]) -> Optional[dict]:
