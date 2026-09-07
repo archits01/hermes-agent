@@ -275,6 +275,7 @@ def build_models_payload(
         rows = list(rows) + [r for r in _append_unconfigured_rows(rows, ctx) if str(r.get("slug", "")).lower() != "moa"]
     _apply_custom_aliases(rows)
     rows = _filter_included_provider_rows(rows, ctx.included_providers or [])
+    rows = _append_nous_free_discovery_row(rows, ctx.included_providers or [])
     rows = _managed_opencode_free_policy(rows, ctx.included_providers or [])
     if ctx.free_only_providers:
         # Current-provider recovery can append a saved OpenRouter/Novita model
@@ -322,6 +323,49 @@ def build_models_payload(
         "model": selected_model,
         "provider": selected_provider,
     }
+
+
+def _append_nous_free_discovery_row(
+    rows: list[dict], included_providers: list[str],
+) -> list[dict]:
+    """Expose Portal free IDs as disabled rows without inventing a provider.
+
+    The managed Open Computer picker may show what Hermes/Nous currently
+    advertises even when no Nous/OpenRouter credential is connected. The row
+    deliberately has no selectable ``models``; the UI renders
+    ``discovered_models`` disabled until a real provider is configured.
+    """
+    included = {
+        str(value or "").strip().lower()
+        for value in included_providers
+        if str(value or "").strip()
+    }
+    if "opencode-free" not in included:
+        return rows
+    try:
+        from hermes_cli.models import get_nous_free_model_ids
+
+        discovered = get_nous_free_model_ids()
+    except Exception:
+        discovered = []
+    if not discovered or any(str(row.get("slug") or "").lower() == "nous-free-catalog" for row in rows):
+        return rows
+    return [
+        *rows,
+        {
+            "authenticated": False,
+            "discovered_models": discovered,
+            "discovery_warning": (
+                "Nous/Portal free models are shown for discovery; connect the provider before selecting one."
+            ),
+            "is_current": False,
+            "models": [],
+            "name": "Nous Free (connect provider)",
+            "slug": "nous-free-catalog",
+            "source": "nous-catalog",
+            "total_models": 0,
+        },
+    ]
 
 
 def _filter_free_only_provider_rows(

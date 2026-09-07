@@ -740,6 +740,9 @@ OPENCODE_FREE_CATALOG_MAX_MODELS = 64
 OPENCODE_FREE_DISCOVERY_VERSION = 1
 OPENCODE_FREE_DISCOVERY_MAX_AGE_SECONDS = 48 * 60 * 60
 OPENCODE_FREE_DISCOVERY_MAX_MODELS = 64
+NOUS_FREE_CATALOG_VERSION = 1
+NOUS_FREE_CATALOG_MAX_AGE_SECONDS = 48 * 60 * 60
+NOUS_FREE_CATALOG_MAX_MODELS = 64
 _OPENCODE_FREE_STATIC_MODELS: tuple[str, ...] = tuple(
     _PROVIDER_MODELS["opencode-free"]
 )
@@ -764,6 +767,13 @@ def opencode_free_discovery_path() -> Path:
     from hermes_constants import get_hermes_home
 
     return get_hermes_home() / "opencode_free_model_discovery.json"
+
+
+def nous_free_catalog_path() -> Path:
+    """Return this profile's cached Nous/Portal free-model discovery path."""
+    from hermes_constants import get_hermes_home
+
+    return get_hermes_home() / "nous_free_model_catalog.json"
 
 
 def _valid_opencode_free_model_id(value: Any) -> bool:
@@ -882,6 +892,87 @@ def get_discovered_opencode_free_model_ids(*, now: Optional[float] = None) -> li
     return _read_opencode_free_discovery(now=now) or []
 
 
+def _read_nous_free_catalog(*, now: Optional[float] = None) -> Optional[list[str]]:
+    """Read the bounded-age Nous free catalog written by the daily refresh."""
+    try:
+        with nous_free_catalog_path().open(encoding="utf-8") as handle:
+            payload = json.load(handle)
+        if not isinstance(payload, dict) or payload.get("version") != NOUS_FREE_CATALOG_VERSION:
+            return None
+        discovered_at = payload.get("discovered_at")
+        current_time = time.time() if now is None else now
+        if (
+            not isinstance(discovered_at, (int, float))
+            or isinstance(discovered_at, bool)
+            or discovered_at <= 0
+            or current_time < discovered_at
+            or current_time - discovered_at > NOUS_FREE_CATALOG_MAX_AGE_SECONDS
+        ):
+            return None
+        raw_models = payload.get("models")
+        if not isinstance(raw_models, list) or len(raw_models) > NOUS_FREE_CATALOG_MAX_MODELS:
+            return None
+        models: list[str] = []
+        seen: set[str] = set()
+        for item in raw_models:
+            model_id = item.get("id") if isinstance(item, dict) else None
+            if not _valid_opencode_free_model_id(model_id):
+                return None
+            key = model_id.lower()
+            if key not in seen:
+                models.append(model_id)
+                seen.add(key)
+        return models
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return None
+
+
+def get_nous_free_model_ids(*, now: Optional[float] = None) -> list[str]:
+    """Return current Nous free IDs for disabled picker rows."""
+    return _read_nous_free_catalog(now=now) or []
+
+
+def write_nous_free_catalog(
+    models: list[str],
+    *,
+    discovered_at: Optional[float] = None,
+    source: str = "https://hermes-agent.nousresearch.com/docs/api/model-catalog.json",
+) -> None:
+    """Atomically store validated Nous free IDs for presentation."""
+    timestamp = time.time() if discovered_at is None else discovered_at
+    if not isinstance(timestamp, (int, float)) or isinstance(timestamp, bool) or timestamp <= 0:
+        raise ValueError("discovered_at must be a positive timestamp")
+    unique: list[str] = []
+    seen: set[str] = set()
+    for model_id in models:
+        if not _valid_opencode_free_model_id(model_id):
+            raise ValueError("invalid Nous free model id")
+        key = model_id.lower()
+        if key not in seen:
+            unique.append(model_id)
+            seen.add(key)
+        if len(unique) > NOUS_FREE_CATALOG_MAX_MODELS:
+            raise ValueError("too many Nous free models")
+    atomic_json_write(
+        nous_free_catalog_path(),
+        {
+            "version": NOUS_FREE_CATALOG_VERSION,
+            "provider": "nous-free-catalog",
+            "discovered_at": timestamp,
+            "source": source,
+            "models": [{"id": model_id} for model_id in unique],
+        },
+        indent=2,
+    )
+
+
+def clear_nous_free_catalog() -> None:
+    try:
+        nous_free_catalog_path().unlink(missing_ok=True)
+    except OSError:
+        return
+
+
 def get_opencode_free_picker_model_sets(
     *, now: Optional[float] = None,
 ) -> tuple[list[str], list[str]]:
@@ -890,7 +981,15 @@ def get_opencode_free_picker_model_sets(
     ``pending`` is presentation-only. It must remain disabled until the
     authenticated daily probe promotes it into the verified catalog.
     """
-    discovered = get_discovered_opencode_free_model_ids(now=now)
+    discovered = list(get_discovered_opencode_free_model_ids(now=now))
+    # Keep Hermes' curated free rows visible as disabled until the live daily
+    # probe confirms that the promotion still exists. This is presentation
+    # metadata only; it never widens the executable verified set.
+    seen_discovered = {model.lower() for model in discovered}
+    for model in _OPENCODE_FREE_STATIC_MODELS:
+        if model.lower() not in seen_discovered:
+            discovered.append(model)
+            seen_discovered.add(model.lower())
     verified = (
         get_verified_opencode_free_model_ids(now=now)
         if has_fresh_verified_opencode_free_catalog(now=now)
