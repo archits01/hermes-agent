@@ -26,6 +26,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from hermes_cli.models import (  # noqa: E402
     _OPENCODE_FREE_STATIC_MODELS,
+    _OPENCODE_KEYLESS_EXTRA_SLUGS,
     OPENCODE_FREE_CATALOG_MAX_MODELS,
     _read_opencode_free_catalog,
     _valid_opencode_free_model_id,
@@ -128,9 +129,12 @@ def conservative_candidates(discovered: list[str]) -> list[str]:
         model.lower()
         for model in (*_OPENCODE_FREE_STATIC_MODELS, *get_stored_opencode_free_model_ids())
     }
+    extra_free = {str(model).lower() for model in _OPENCODE_KEYLESS_EXTRA_SLUGS}
     candidates = [
         model for model in discovered
-        if model.lower() in known or model.lower().endswith("-free")
+        if model.lower() in known
+        or model.lower().endswith("-free")
+        or model.lower() in extra_free
     ]
     return candidates[:MAX_PROBE_CANDIDATES]
 
