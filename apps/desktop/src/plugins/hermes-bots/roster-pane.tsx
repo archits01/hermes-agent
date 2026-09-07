@@ -304,7 +304,7 @@ export function BotsPane() {
 
   const sourceWithSelectedOwner =
     selectionHydrated && rosterHydrated ? rosterWithSelectedOwner(source, sourceSnapshot, selectedRosterKey) : source
-  const activeConnectionKey = String(activeConnectionId || '').trim()
+  const activeConnectionKey = String(host.state.connectionId?.get?.() || host.activeConnectionId?.() || '').trim()
   const vmPrimaryVisible = Boolean(
     activeConnectionKey &&
     activeConnectionKey !== 'local' &&
