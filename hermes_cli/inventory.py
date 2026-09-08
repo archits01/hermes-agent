@@ -207,8 +207,11 @@ def build_models_payload(
         probe_current_custom_provider=probe_current_custom_provider,
         for_picker=for_picker,
         excluded_providers=ctx.excluded_providers or [],
-        included_providers=ctx.included_providers or [],
-        free_only_providers=ctx.free_only_providers or [],
+        # Apply managed provider/free-model policy once below, after the raw
+        # rows exist. This lets the desktop payload retain disabled discovery
+        # rows without widening the executable model list used by the CLI/TUI.
+        included_providers=[],
+        free_only_providers=[],
     )
 
     moa_row = _moa_provider_row(ctx.current_provider)
