@@ -12,13 +12,9 @@ import {
   $projectScope,
   $projectsRpcAvailable,
   $projectTree,
-  $removedSessionIds,
-  $sessionMutationsInFlight,
   $worktreeRefreshToken,
   ALL_PROJECTS,
-  beginSessionMutation,
   createProject,
-  endSessionMutation,
   enterProject,
   exitProjectScope,
   openProjectCreate,
@@ -30,9 +26,15 @@ import {
   refreshWorktrees,
   resolveNewSessionCwd,
   scanAndRecordRepos,
-  startWorkInRepo,
-  tombstoneSessions
+  startWorkInRepo
 } from './projects'
+import {
+  $removedSessionIds,
+  $sessionMutationsInFlight,
+  beginSessionMutation,
+  endSessionMutation,
+  tombstoneSessions
+} from './session-removal'
 
 vi.mock('@/i18n', () => ({
   translateNow: (key: string) => key
@@ -118,6 +120,61 @@ describe('project scope', () => {
   })
 })
 
+<<<<<<< HEAD
+=======
+describe('projects RPC profile forwarding', () => {
+  it('distinguishes a failed drill-in from an empty project', async () => {
+    const failure = new Error('gateway read failed')
+    const request = vi.fn().mockRejectedValueOnce(failure).mockResolvedValueOnce({ project: null })
+    activeGateway.mockReturnValue({ connectionState: 'open', request } as unknown as ReturnType<typeof activeGateway>)
+    await expect(fetchProjectSessions('p_123')).rejects.toBe(failure)
+    await expect(fetchProjectSessions('p_123')).resolves.toBeNull()
+  })
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    $activeGatewayProfile.set('default')
+    $activeProjectId.set(null)
+    $projectTree.set([])
+    setShowAllProfiles(false)
+  })
+
+  it('forwards the normalized active profile to project read RPCs', async () => {
+    const request = vi.fn(async () => ({ active_id: null, projects: [], scoped_session_ids: [] }))
+    const gateway = { connectionState: 'open', request }
+    activeGateway.mockReturnValue(gateway as never)
+    gatewayAtom.set(gateway as never)
+    $activeGatewayProfile.set('  coder  ')
+
+    await refreshProjects()
+    await refreshProjectTree()
+    await fetchProjectSessions('p_123')
+
+    expect(request).toHaveBeenNthCalledWith(1, 'projects.list', { profile: 'coder' })
+    expect(request).toHaveBeenNthCalledWith(2, 'projects.tree', { preview_limit: 3, profile: 'coder' })
+    expect(request).toHaveBeenNthCalledWith(3, 'projects.project_sessions', {
+      profile: 'coder',
+      project_id: 'p_123'
+    })
+  })
+
+  it('skips project reads in the all-profiles view rather than forwarding its sentinel', async () => {
+    const request = vi.fn()
+    const gateway = { connectionState: 'open', request }
+    activeGateway.mockReturnValue(gateway as never)
+    gatewayAtom.set(gateway as never)
+    setShowAllProfiles(true)
+
+    await refreshProjects()
+    await refreshProjectTree()
+    await fetchProjectSessions('p_123')
+
+    expect(request).not.toHaveBeenCalled()
+    setShowAllProfiles(false)
+  })
+})
+
+>>>>>>> upstream/main
 describe('resolveNewSessionCwd', () => {
   beforeEach(() => {
     $projectScope.set(ALL_PROJECTS)
@@ -530,7 +587,38 @@ describe('repository discovery policy', () => {
 })
 
 describe('project tree profile isolation', () => {
+<<<<<<< HEAD
   it('does not publish a late response from the previous profile', async () => {
+=======
+  beforeEach(() => {
+    setShowAllProfiles(false)
+    $activeGatewayProfile.set('default')
+    $projects.set([])
+    $projectTree.set([])
+  })
+
+  it('retries a dropped projects.tree request once on the active gateway', async () => {
+    const request = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('request timed out after 30s: projects.tree'))
+      .mockResolvedValueOnce({
+        active_id: null,
+        projects: [{ id: 'remote-tree', label: 'Remote tree', path: null, repos: [], sessionCount: 0 }],
+        scoped_session_ids: []
+      })
+
+    const gateway = { connectionState: 'open', request }
+    activeGateway.mockReturnValue(gateway as never)
+    gatewayAtom.set(gateway as never)
+
+    await refreshProjectTree()
+
+    expect(request).toHaveBeenCalledTimes(2)
+    expect($projectTree.get().map(project => project.id)).toEqual(['remote-tree'])
+  })
+
+  it('does not publish a late response from the previous gateway', async () => {
+>>>>>>> upstream/main
     let resolveA: ((value: unknown) => void) | undefined
 
     const responseA = new Promise(resolve => {
