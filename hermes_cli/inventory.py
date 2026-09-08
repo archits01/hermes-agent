@@ -343,18 +343,18 @@ def _append_nous_free_discovery_row(
     if "opencode-free" not in included:
         return rows
     try:
-        from hermes_cli.models import get_nous_free_model_ids
+        from hermes_cli.models import get_nous_free_model_ids, get_openrouter_free_model_ids
 
-        discovered = get_nous_free_model_ids()
+        nous_models = get_nous_free_model_ids()
+        openrouter_models = get_openrouter_free_model_ids()
     except Exception:
-        discovered = []
-    if not discovered or any(str(row.get("slug") or "").lower() == "nous-free-catalog" for row in rows):
-        return rows
-    return [
-        *rows,
-        {
+        nous_models, openrouter_models = [], []
+    existing = {str(row.get("slug") or "").lower() for row in rows}
+    additions: list[dict] = []
+    if nous_models and "nous-free-catalog" not in existing:
+        additions.append({
             "authenticated": False,
-            "discovered_models": discovered,
+            "discovered_models": nous_models,
             "discovery_warning": (
                 "Nous/Portal free models are shown for discovery; connect the provider before selecting one."
             ),
@@ -364,8 +364,22 @@ def _append_nous_free_discovery_row(
             "slug": "nous-free-catalog",
             "source": "nous-catalog",
             "total_models": 0,
-        },
-    ]
+        })
+    if openrouter_models and "openrouter-free-catalog" not in existing:
+        additions.append({
+            "authenticated": False,
+            "discovered_models": openrouter_models,
+            "discovery_warning": (
+                "OpenRouter free models are shown for discovery; connect OpenRouter before selecting one."
+            ),
+            "is_current": False,
+            "models": [],
+            "name": "OpenRouter Free (connect provider)",
+            "slug": "openrouter-free-catalog",
+            "source": "openrouter-catalog",
+            "total_models": 0,
+        })
+    return [*rows, *additions]
 
 
 def _filter_free_only_provider_rows(

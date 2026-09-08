@@ -39,6 +39,7 @@ from hermes_cli.models import (  # noqa: E402
     opencode_zen_free_headers,
     write_opencode_free_discovery_catalog,
     write_nous_free_catalog,
+    write_openrouter_free_catalog,
     write_verified_opencode_free_catalog,
 )
 
@@ -261,6 +262,30 @@ def _refresh_nous_free_catalog() -> int | None:
         return None
 
 
+def _refresh_openrouter_free_catalog() -> int | None:
+    """Cache live OpenRouter zero-price IDs for disabled picker rows."""
+    try:
+        from hermes_cli.models import fetch_openrouter_models, get_pricing_for_provider
+
+        rows = fetch_openrouter_models()
+        pricing = get_pricing_for_provider("openrouter") or {}
+        ids: list[str] = []
+        for model_id, _description in rows:
+            price = pricing.get(model_id) or {}
+            try:
+                is_free = float(price.get("prompt", 1)) == 0 and float(price.get("completion", 1)) == 0
+            except (TypeError, ValueError):
+                is_free = False
+            if is_free and model_id not in ids:
+                ids.append(model_id)
+        if not ids:
+            return None
+        write_openrouter_free_catalog(ids, discovered_at=time.time())
+        return len(ids)
+    except Exception:
+        return None
+
+
 def refresh_catalog(base_url: str = DEFAULT_BASE_URL, *, timeout: float = 10.0) -> dict[str, Any]:
     """Probe and atomically publish a safe OpenCode Free catalog.
 
@@ -273,6 +298,7 @@ def refresh_catalog(base_url: str = DEFAULT_BASE_URL, *, timeout: float = 10.0) 
         raise ValueError("OpenCode Free refresh requires an https endpoint")
 
     nous_models = _refresh_nous_free_catalog()
+    openrouter_models = _refresh_openrouter_free_catalog()
 
     previous_snapshot = get_fresh_opencode_free_catalog_snapshot()
     previous = previous_snapshot[0] if previous_snapshot else []
@@ -281,14 +307,14 @@ def refresh_catalog(base_url: str = DEFAULT_BASE_URL, *, timeout: float = 10.0) 
     if discovery_outcome != "success":
         if discovery_outcome == "transient" and previous:
             _refresh_picker_cache(previous)
-            return {"status": "retained_transient", "models": len(previous), "nous_models": nous_models}
+            return {"status": "retained_transient", "models": len(previous), "nous_models": nous_models, "openrouter_models": openrouter_models}
         if discovery_outcome == "definitive":
             # A malformed or rejected authoritative discovery response proves
             # the old cache cannot remain a managed availability signal.
             clear_verified_opencode_free_catalog()
             clear_opencode_free_discovery_catalog()
-            return {"status": "definitive_discovery_failed", "models": 0, "nous_models": nous_models}
-        return {"status": "unavailable", "models": 0, "nous_models": nous_models}
+            return {"status": "definitive_discovery_failed", "models": 0, "nous_models": nous_models, "openrouter_models": openrouter_models}
+        return {"status": "unavailable", "models": 0, "nous_models": nous_models, "openrouter_models": openrouter_models}
 
     candidates = conservative_candidates(discovered)
     # Keep advertised free IDs visible as disabled picker rows even when a
@@ -317,7 +343,7 @@ def refresh_catalog(base_url: str = DEFAULT_BASE_URL, *, timeout: float = 10.0) 
             accepted, verified_at=verified_at, source=normalized_base
         )
         _refresh_picker_cache(accepted)
-        return {"status": "updated", "models": len(accepted), "nous_models": nous_models}
+        return {"status": "updated", "models": len(accepted), "nous_models": nous_models, "openrouter_models": openrouter_models}
     if retained_transient and previous_verified_at is not None:
         write_verified_opencode_free_catalog(
             retained_transient,
@@ -325,7 +351,7 @@ def refresh_catalog(base_url: str = DEFAULT_BASE_URL, *, timeout: float = 10.0) 
             source=normalized_base,
         )
         _refresh_picker_cache(retained_transient)
-        return {"status": "retained_transient", "models": len(retained_transient), "nous_models": nous_models}
+        return {"status": "retained_transient", "models": len(retained_transient), "nous_models": nous_models, "openrouter_models": openrouter_models}
     if not accepted:
         # A complete, definitive empty result must not replace a useful
         # fallback with an empty row.  Once any old verification expires the
@@ -334,7 +360,7 @@ def refresh_catalog(base_url: str = DEFAULT_BASE_URL, *, timeout: float = 10.0) 
         # the old cache is no longer acceptable.  Remove it rather than
         # accidentally extending managed-picker availability until its TTL.
         clear_verified_opencode_free_catalog()
-        return {"status": "no_verified_models", "models": 0, "nous_models": nous_models}
+        return {"status": "no_verified_models", "models": 0, "nous_models": nous_models, "openrouter_models": openrouter_models}
 
 
 

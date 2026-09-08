@@ -743,6 +743,9 @@ OPENCODE_FREE_DISCOVERY_MAX_MODELS = 64
 NOUS_FREE_CATALOG_VERSION = 1
 NOUS_FREE_CATALOG_MAX_AGE_SECONDS = 48 * 60 * 60
 NOUS_FREE_CATALOG_MAX_MODELS = 64
+OPENROUTER_FREE_CATALOG_VERSION = 1
+OPENROUTER_FREE_CATALOG_MAX_AGE_SECONDS = 48 * 60 * 60
+OPENROUTER_FREE_CATALOG_MAX_MODELS = 64
 _OPENCODE_FREE_STATIC_MODELS: tuple[str, ...] = tuple(
     _PROVIDER_MODELS["opencode-free"]
 )
@@ -774,6 +777,13 @@ def nous_free_catalog_path() -> Path:
     from hermes_constants import get_hermes_home
 
     return get_hermes_home() / "nous_free_model_catalog.json"
+
+
+def openrouter_free_catalog_path() -> Path:
+    """Return this profile's cached OpenRouter free-model discovery path."""
+    from hermes_constants import get_hermes_home
+
+    return get_hermes_home() / "openrouter_free_model_catalog.json"
 
 
 def _valid_opencode_free_model_id(value: Any) -> bool:
@@ -971,6 +981,73 @@ def clear_nous_free_catalog() -> None:
         nous_free_catalog_path().unlink(missing_ok=True)
     except OSError:
         return
+
+
+def get_openrouter_free_model_ids(*, now: Optional[float] = None) -> list[str]:
+    """Return current OpenRouter zero-price IDs for disabled picker rows."""
+    try:
+        with openrouter_free_catalog_path().open(encoding="utf-8") as handle:
+            payload = json.load(handle)
+        if not isinstance(payload, dict) or payload.get("version") != OPENROUTER_FREE_CATALOG_VERSION:
+            return []
+        discovered_at = payload.get("discovered_at")
+        current_time = time.time() if now is None else now
+        if (
+            not isinstance(discovered_at, (int, float))
+            or isinstance(discovered_at, bool)
+            or discovered_at <= 0
+            or current_time < discovered_at
+            or current_time - discovered_at > OPENROUTER_FREE_CATALOG_MAX_AGE_SECONDS
+        ):
+            return []
+        raw_models = payload.get("models")
+        if not isinstance(raw_models, list) or len(raw_models) > OPENROUTER_FREE_CATALOG_MAX_MODELS:
+            return []
+        result: list[str] = []
+        seen: set[str] = set()
+        for item in raw_models:
+            model_id = item.get("id") if isinstance(item, dict) else None
+            if not _valid_opencode_free_model_id(model_id):
+                return []
+            if model_id.lower() not in seen:
+                result.append(model_id)
+                seen.add(model_id.lower())
+        return result
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return []
+
+
+def write_openrouter_free_catalog(
+    models: list[str],
+    *,
+    discovered_at: Optional[float] = None,
+    source: str = "https://openrouter.ai/api/v1/models",
+) -> None:
+    """Atomically store live OpenRouter zero-price IDs for disabled rows."""
+    timestamp = time.time() if discovered_at is None else discovered_at
+    if not isinstance(timestamp, (int, float)) or isinstance(timestamp, bool) or timestamp <= 0:
+        raise ValueError("discovered_at must be a positive timestamp")
+    unique: list[str] = []
+    seen: set[str] = set()
+    for model_id in models:
+        if not _valid_opencode_free_model_id(model_id):
+            raise ValueError("invalid OpenRouter free model id")
+        if model_id.lower() not in seen:
+            unique.append(model_id)
+            seen.add(model_id.lower())
+        if len(unique) > OPENROUTER_FREE_CATALOG_MAX_MODELS:
+            raise ValueError("too many OpenRouter free models")
+    atomic_json_write(
+        openrouter_free_catalog_path(),
+        {
+            "version": OPENROUTER_FREE_CATALOG_VERSION,
+            "provider": "openrouter-free-catalog",
+            "discovered_at": timestamp,
+            "source": source,
+            "models": [{"id": model_id} for model_id in unique],
+        },
+        indent=2,
+    )
 
 
 def get_opencode_free_picker_model_sets(
