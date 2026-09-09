@@ -49,6 +49,8 @@ _TRANSIENT_STATUS_CODES = frozenset({408, 425, 429})
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 MAX_DISCOVERED_MODELS = 1000
 MAX_PROBE_CANDIDATES = min(32, OPENCODE_FREE_CATALOG_MAX_MODELS)
+MAX_PROBE_ATTEMPTS = 2
+PROBE_RETRY_DELAY_SECONDS = 1.0
 
 
 def _headers() -> dict[str, str]:
@@ -175,9 +177,20 @@ def probe_anonymous_model(base_url: str, model_id: str, *, timeout: float) -> st
         headers=_headers(),
         method="POST",
     )
-    outcome, _status, payload = _request_json(request, timeout=timeout)
-    if outcome != "success" or not isinstance(payload, dict) or payload.get("error"):
+    outcome, status, payload = _request_json(request, timeout=timeout)
+    if outcome != "success" or not isinstance(payload, dict):
+        # Responses-only models may reject the non-streaming shape with a
+        # definitive 4xx even though their streaming endpoint is healthy.
+        if mode == "codex_responses" and status in (400, 404, 405, 422):
+            return probe_responses_stream(base_url, model_id, timeout=timeout)
         return "definitive" if outcome == "success" else outcome
+    if payload.get("error"):
+        # Some Responses-only relays return HTTP 200 with an error envelope
+        # for the non-streaming shape. The runtime uses streaming, so probe
+        # that wire before rejecting the model.
+        if mode == "codex_responses":
+            return probe_responses_stream(base_url, model_id, timeout=timeout)
+        return "definitive"
     if mode == "codex_responses":
         response_id = payload.get("id")
         output = payload.get("output")
@@ -200,7 +213,7 @@ def probe_anonymous_model(base_url: str, model_id: str, *, timeout: float) -> st
         )
         if isinstance(response_id, str) and response_id.strip() and valid_output:
             return "success"
-        return "definitive"
+        return probe_responses_stream(base_url, model_id, timeout=timeout)
     choices = payload.get("choices")
     if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
         return "definitive"
@@ -212,6 +225,78 @@ def probe_anonymous_model(base_url: str, model_id: str, *, timeout: float) -> st
     if role != "assistant" or not (isinstance(content, str) and content.strip()):
         return "definitive"
     return "success"
+
+
+def probe_responses_stream(base_url: str, model_id: str, *, timeout: float) -> str:
+    """Check the streaming Responses wire used by the runtime.
+
+    Some relay models return an empty non-streaming envelope but emit real
+    assistant text on the streaming endpoint. Require text plus a terminal
+    response.completed event before accepting the model.
+    """
+    request = urllib.request.Request(
+        f"{base_url.rstrip('/')}/responses",
+        data=json.dumps({
+            "model": model_id,
+            "input": "Reply OK",
+            "max_output_tokens": 256,
+            "stream": True,
+        }).encode("utf-8"),
+        headers=_headers(),
+        method="POST",
+    )
+    size = 0
+    has_text = False
+    deadline = time.monotonic() + timeout
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            while time.monotonic() < deadline:
+                raw = response.readline(MAX_RESPONSE_BYTES - size + 1)
+                if not raw:
+                    break
+                size += len(raw)
+                if size > MAX_RESPONSE_BYTES:
+                    return "definitive"
+                if not raw.startswith(b"data:"):
+                    continue
+                try:
+                    event = json.loads(raw[5:].strip())
+                except (ValueError, UnicodeDecodeError):
+                    continue
+                if not isinstance(event, dict):
+                    continue
+                kind = event.get("type")
+                if kind == "response.output_text.delta":
+                    delta = event.get("delta")
+                    has_text |= isinstance(delta, str) and bool(delta.strip())
+                if kind in ("error", "response.failed", "response.incomplete"):
+                    return "definitive"
+                if kind == "response.completed":
+                    return "success" if has_text else "definitive"
+        return "transient"
+    except urllib.error.HTTPError as exc:
+        return "transient" if _is_transient_status(exc.code) else "definitive"
+    except (urllib.error.URLError, TimeoutError, OSError):
+        return "transient"
+
+
+def probe_candidate_with_retries(
+    base_url: str, model_id: str, *, timeout: float, attempts: int = MAX_PROBE_ATTEMPTS
+) -> str:
+    """Retry only inconclusive provider failures before excluding a candidate.
+
+    A transient timeout/429 is not proof that a free promotion ended. Keep the
+    retry bounded so the daily job cannot loop or turn a provider outage into a
+    large request burst; definitive rejects still stop immediately.
+    """
+    bounded_attempts = max(1, min(int(attempts), MAX_PROBE_ATTEMPTS))
+    outcome = "transient"
+    for attempt in range(bounded_attempts):
+        outcome = probe_anonymous_model(base_url, model_id, timeout=timeout)
+        if outcome != "transient" or attempt + 1 >= bounded_attempts:
+            return outcome
+        time.sleep(PROBE_RETRY_DELAY_SECONDS)
+    return outcome
 
 
 def _refresh_picker_cache(models: list[str]) -> None:
@@ -307,14 +392,14 @@ def refresh_catalog(base_url: str = DEFAULT_BASE_URL, *, timeout: float = 10.0) 
     if discovery_outcome != "success":
         if discovery_outcome == "transient" and previous:
             _refresh_picker_cache(previous)
-            return {"status": "retained_transient", "models": len(previous), "nous_models": nous_models, "openrouter_models": openrouter_models}
+            return {"status": "retained_transient", "models": len(previous)}
         if discovery_outcome == "definitive":
             # A malformed or rejected authoritative discovery response proves
             # the old cache cannot remain a managed availability signal.
             clear_verified_opencode_free_catalog()
             clear_opencode_free_discovery_catalog()
-            return {"status": "definitive_discovery_failed", "models": 0, "nous_models": nous_models, "openrouter_models": openrouter_models}
-        return {"status": "unavailable", "models": 0, "nous_models": nous_models, "openrouter_models": openrouter_models}
+            return {"status": "definitive_discovery_failed", "models": 0}
+        return {"status": "unavailable", "models": 0}
 
     candidates = conservative_candidates(discovered)
     # Keep advertised free IDs visible as disabled picker rows even when a
@@ -326,7 +411,7 @@ def refresh_catalog(base_url: str = DEFAULT_BASE_URL, *, timeout: float = 10.0) 
     retained_transient: list[str] = []
     previous_by_key = {model.lower(): model for model in previous}
     for model_id in candidates:
-        outcome = probe_anonymous_model(normalized_base, model_id, timeout=timeout)
+        outcome = probe_candidate_with_retries(normalized_base, model_id, timeout=timeout)
         if outcome == "success":
             accepted.append(model_id)
         elif outcome == "transient" and model_id.lower() in previous_by_key:
@@ -343,7 +428,7 @@ def refresh_catalog(base_url: str = DEFAULT_BASE_URL, *, timeout: float = 10.0) 
             accepted, verified_at=verified_at, source=normalized_base
         )
         _refresh_picker_cache(accepted)
-        return {"status": "updated", "models": len(accepted), "nous_models": nous_models, "openrouter_models": openrouter_models}
+        return {"status": "updated", "models": len(accepted)}
     if retained_transient and previous_verified_at is not None:
         write_verified_opencode_free_catalog(
             retained_transient,
@@ -351,7 +436,7 @@ def refresh_catalog(base_url: str = DEFAULT_BASE_URL, *, timeout: float = 10.0) 
             source=normalized_base,
         )
         _refresh_picker_cache(retained_transient)
-        return {"status": "retained_transient", "models": len(retained_transient), "nous_models": nous_models, "openrouter_models": openrouter_models}
+        return {"status": "retained_transient", "models": len(retained_transient)}
     if not accepted:
         # A complete, definitive empty result must not replace a useful
         # fallback with an empty row.  Once any old verification expires the
@@ -360,7 +445,7 @@ def refresh_catalog(base_url: str = DEFAULT_BASE_URL, *, timeout: float = 10.0) 
         # the old cache is no longer acceptable.  Remove it rather than
         # accidentally extending managed-picker availability until its TTL.
         clear_verified_opencode_free_catalog()
-        return {"status": "no_verified_models", "models": 0, "nous_models": nous_models, "openrouter_models": openrouter_models}
+        return {"status": "no_verified_models", "models": 0}
 
 
 

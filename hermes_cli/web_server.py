@@ -5717,17 +5717,32 @@ async def get_action_status(name: str, lines: int = 200):
         exit_code = result.get("exit_code") if result else None
         pid = result.get("pid") if result else None
         if result is None and durable_update_action_id:
-            exit_code = 0
+            # The marker is a legacy completion signal, not the durable
+            # outcome. An update receipt can still record a failed/refused
+            # run after the marker was written (for example, a late
+            # command-boundary failure). Let that receipt win so a
+            # restarted dashboard never reports a failed update as success.
+            receipt_outcome = (
+                update_receipt_summary.get("outcome")
+                if update_receipt_summary
+                else None
+            )
+            exit_code = 0 if receipt_outcome in (None, "success") else 1
         if (
             result is None
             and exit_code is None
             and update_receipt_summary is not None
-            and update_receipt_summary.get("outcome") in ("success", "partial")
+            and update_receipt_summary.get("outcome") in (
+                "success",
+                "partial",
+                "failed",
+                "refused",
+            )
         ):
             # No in-memory result and no log marker (e.g. log rotated), but
-            # the receipt proves a completed run: report its outcome rather
-            # than a null that clients time out on. ``partial`` maps to
-            # exit 1 exactly like the CLI run itself did.
+            # the receipt proves a terminal run: report its outcome rather
+            # than a null that clients time out on. Non-success outcomes map
+            # to exit 1 exactly like the CLI run itself did.
             exit_code = 0 if update_receipt_summary["outcome"] == "success" else 1
     else:
         exit_code = proc.poll()

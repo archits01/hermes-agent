@@ -3536,6 +3536,13 @@ def list_available_providers() -> list[dict[str, str]]:
                 has_creds = bool(custom_base_url.strip())
             elif pid == "openrouter":
                 has_creds = has_usable_secret(os.getenv("OPENROUTER_API_KEY", ""))
+                if not has_creds:
+                    try:
+                        from agent.credential_pool import load_pool
+
+                        has_creds = load_pool("openrouter").has_credentials()
+                    except Exception:
+                        has_creds = False
             else:
                 status = get_auth_status(pid)
                 has_creds = bool(status.get("logged_in") or status.get("configured"))
