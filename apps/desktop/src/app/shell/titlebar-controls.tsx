@@ -7,11 +7,11 @@ import { toggleLayoutEditMode } from '@/components/pane-shell/edit-mode'
 import { resetLayoutTree } from '@/components/pane-shell/tree/store'
 import { Button } from '@/components/ui/button'
 import { Tip, TipKeybindLabel } from '@/components/ui/tooltip'
+import { Slot } from '@/contrib/react/slot'
 import { useI18n } from '@/i18n'
 import { triggerHaptic } from '@/lib/haptics'
 import { formatModifierToken } from '@/lib/keybinds/combo'
 import { cn } from '@/lib/utils'
-import { $hapticsMuted, toggleHapticsMuted } from '@/store/haptics'
 import { toggleHud } from '@/store/hud'
 import { $sidebarOpen, togglePanesFlipped, toggleSidebarOpen } from '@/store/layout'
 
@@ -39,6 +39,9 @@ export interface TitlebarTool {
   actionId?: string
   title?: string
   to?: string
+  /** Durable `data-tour` handle. Tools are addressed by icon and translated
+   *  label otherwise, and neither survives a theme or a locale change. */
+  tour?: string
 }
 
 export type TitlebarToolSide = 'left' | 'right'
@@ -101,9 +104,15 @@ export function TitlebarControls({ leftTools = [], tools = [], onOpenSettings }:
   const navigate = useNavigate()
   const location = useLocation()
   const modHeld = useModifierHeld()
+<<<<<<< HEAD
   const hapticsMuted = useStore($hapticsMuted)
+=======
+  const fileBrowserOpen = useStore($fileBrowserOpen)
+  const panesFlipped = useStore($panesFlipped)
+>>>>>>> upstream/main
   const sidebarOpen = useStore($sidebarOpen)
 
+<<<<<<< HEAD
   const toggleHaptics = () => {
     if (!hapticsMuted) {
       triggerHaptic('tap')
@@ -121,8 +130,16 @@ export function TitlebarControls({ leftTools = [], tools = [], onOpenSettings }:
   // stays correct through flips and rearranges. $sidebarOpen ≙ left side.
   // The files/source-code right sidebar is not exposed as a titlebar button.
   // Never an active highlight — plain show/hide affordances.
+=======
+  // POSITIONAL toggles: each button shows/hides everything on its physical
+  // side of the main zone (the layout tree collapses the whole side), so they
+  // stay correct through flips and rearranges. $sidebarOpen ≙ left side,
+  // $fileBrowserOpen ≙ right side. Never an active highlight — plain
+  // show/hide affordances.
+>>>>>>> upstream/main
   const leftEdge = { open: sidebarOpen, toggle: toggleSidebarOpen }
 
+<<<<<<< HEAD
   const leftToolbarTools: TitlebarTool[] = [
     {
       actionId: 'view.toggleSidebar',
@@ -148,7 +165,56 @@ export function TitlebarControls({ leftTools = [], tools = [], onOpenSettings }:
   ]
 
   // Static system tools — always pinned to the screen's right edge.
+=======
+  const sidebarTool: TitlebarTool = {
+    actionId: 'view.toggleSidebar',
+    badge: panesFlipped ? undefined : unreadBadge,
+    icon: <TitlebarIcon name="layout-sidebar-left" />,
+    id: 'sidebar',
+    label: `${leftLabel}${panesFlipped ? '' : unreadHint}`,
+    onSelect: () => {
+      triggerHaptic('tap')
+      leftEdge.toggle()
+    }
+  }
+
+  const flipTool: TitlebarTool = {
+    actionId: 'view.flipPanes',
+    icon: <TitlebarIcon name="arrow-swap" />,
+    id: 'flip-panes',
+    label: t.titlebar.swapSidebarSides,
+    onSelect: () => {
+      triggerHaptic('tap')
+      togglePanesFlipped()
+    }
+  }
+
+  const rightSidebarTool: TitlebarTool = {
+    actionId: 'view.toggleRightSidebar',
+    badge: panesFlipped ? unreadBadge : undefined,
+    icon: <TitlebarIcon name="layout-sidebar-right" />,
+    id: 'right-sidebar',
+    label: `${rightLabel}${panesFlipped ? unreadHint : ''}`,
+    onSelect: () => {
+      triggerHaptic('tap')
+      rightEdge.toggle()
+    },
+    tour: 'right-pane-toggle'
+  }
+
+  // App actions stay visible beside the left sidebar toggle.
+>>>>>>> upstream/main
   const systemTools: TitlebarTool[] = [
+    {
+      actionId: 'nav.settings',
+      icon: <TitlebarIcon name="settings-gear" />,
+      id: 'settings',
+      label: t.titlebar.openSettings,
+      onSelect: () => {
+        triggerHaptic('open')
+        onOpenSettings()
+      }
+    },
     {
       className: 'group/tool',
       // Hover + held ⌘/Ctrl morphs the glyph into its reset form (see
@@ -182,23 +248,6 @@ export function TitlebarControls({ leftTools = [], tools = [], onOpenSettings }:
         triggerHaptic('open')
         toggleHud(hudTargetSessionId())
       }
-    },
-    {
-      active: hapticsMuted,
-      icon: <TitlebarIcon name={hapticsMuted ? 'mute' : 'unmute'} />,
-      id: 'haptics',
-      label: hapticsMuted ? t.titlebar.unmuteHaptics : t.titlebar.muteHaptics,
-      onSelect: toggleHaptics
-    },
-    {
-      actionId: 'nav.settings',
-      icon: <TitlebarIcon name="settings-gear" />,
-      id: 'settings',
-      label: t.titlebar.openSettings,
-      onSelect: () => {
-        triggerHaptic('open')
-        onOpenSettings()
-      }
     }
   ]
 
@@ -210,8 +259,7 @@ export function TitlebarControls({ leftTools = [], tools = [], onOpenSettings }:
     return null
   }
 
-  const visibleSystemTools = systemTools.filter(tool => !tool.hidden)
-  const visiblePaneTools = tools.filter(tool => !tool.hidden)
+  const visibleLeftTools = [sidebarTool, ...systemTools, ...leftTools, ...tools].filter(tool => !tool.hidden)
 
   return (
     <>
@@ -222,42 +270,26 @@ export function TitlebarControls({ leftTools = [], tools = [], onOpenSettings }:
           'left-(--titlebar-controls-left) top-(--titlebar-controls-top) translate-y-(--titlebar-controls-y-nudge)'
         )}
       >
-        {leftToolbarTools
-          .filter(tool => !tool.hidden)
-          .map(tool => (
-            <TitlebarToolButton key={tool.id} navigate={navigate} tool={tool} />
-          ))}
+        {visibleLeftTools.map(tool => (
+          <TitlebarToolButton key={tool.id} navigate={navigate} tool={tool} />
+        ))}
+        <Slot area="titleBar.left" />
+        <Slot area="titleBar.center" />
+        <Slot area="titleBar.right" />
       </div>
-
-      {/*
-        Pane-scoped tools (preview's monitor / devtools / refresh / X) render
-        as their own fixed cluster. AppShell sets --shell-preview-toolbar-gap
-        to either the static cluster's width (file-browser closed → cluster
-        sits flush against system tools) or the file-browser pane's width
-        (file-browser open → cluster sits flush against the file-browser pane,
-        i.e. at the preview pane's right edge). No margin hacks needed.
-      */}
-      {visiblePaneTools.length > 0 && (
-        <div
-          aria-label={t.shell.paneControls}
-          className={cn(
-            titlebarToolClusterClass,
-            'top-[calc(var(--titlebar-controls-top)+var(--right-rail-top-inset,0px))] right-[calc(var(--titlebar-tools-right)+var(--shell-preview-toolbar-gap,0))]'
-          )}
-        >
-          {visiblePaneTools.map(tool => (
-            <TitlebarToolButton key={tool.id} navigate={navigate} tool={tool} />
-          ))}
-        </div>
-      )}
 
       <div
         aria-label={t.shell.appControls}
         className={cn(titlebarToolClusterClass, 'right-(--titlebar-tools-right) top-(--titlebar-controls-top)')}
       >
+<<<<<<< HEAD
         {visibleSystemTools.map(tool => (
           <TitlebarToolButton key={tool.id} navigate={navigate} tool={tool} />
         ))}
+=======
+        <TitlebarToolButton navigate={navigate} tool={flipTool} />
+        <TitlebarToolButton navigate={navigate} tool={rightSidebarTool} />
+>>>>>>> upstream/main
       </div>
     </>
   )
@@ -281,6 +313,7 @@ function TitlebarToolButton({ navigate, tool }: { navigate: ReturnType<typeof us
         <Button asChild className={className} size="icon-titlebar" variant="ghost">
           <a
             aria-label={tool.label}
+            data-tour={tool.tour}
             href={tool.href}
             onPointerDown={event => event.stopPropagation()}
             rel="noreferrer"
@@ -299,6 +332,7 @@ function TitlebarToolButton({ navigate, tool }: { navigate: ReturnType<typeof us
         aria-label={tool.label}
         aria-pressed={tool.active ?? undefined}
         className={className}
+        data-tour={tool.tour}
         disabled={tool.disabled}
         onClick={event => {
           if (tool.to) {

@@ -40,6 +40,7 @@ import {
   IconEar as Ear,
   IconEarOff as EarOff,
   IconEgg as Egg,
+  IconPlayerEjectFilled as Eject,
   IconExternalLink as ExternalLink,
   IconEye as Eye,
   IconEyeOff as EyeOff,
@@ -95,6 +96,11 @@ import {
   IconPin as Pin,
   IconPlayerPlay as Play,
   IconPlus as Plus,
+<<<<<<< HEAD
+=======
+  IconPower as Power,
+  IconQrcode as QrCode,
+>>>>>>> upstream/main
   IconRefresh as RefreshCw,
   IconRefresh as RefreshCwIcon,
   IconDeviceFloppy as Save,
@@ -169,6 +175,7 @@ export {
   Ear,
   EarOff,
   Egg,
+  Eject,
   ExternalLink,
   Eye,
   EyeOff,
@@ -224,6 +231,11 @@ export {
   Pin,
   Play,
   Plus,
+<<<<<<< HEAD
+=======
+  Power,
+  QrCode,
+>>>>>>> upstream/main
   RefreshCw,
   RefreshCwIcon,
   Save,
