@@ -3,7 +3,7 @@
 
 This job deliberately does *not* trust a model's pricing metadata.  A model
 only reaches the picker after the OpenCode ``/models`` endpoint lists it and a
-one-token anonymous request succeeds using Hermes' own headers.  It is safe to
+a bounded anonymous request returns assistant output using Hermes' own headers.  It is safe to
 run daily from a profile-scoped cron because the cache follows ``HERMES_HOME``.
 """
 
@@ -33,6 +33,7 @@ from hermes_cli.models import (  # noqa: E402
     clear_opencode_free_discovery_catalog,
     clear_verified_opencode_free_catalog,
     get_fresh_opencode_free_catalog_snapshot,
+    opencode_free_catalog_path,
     get_stored_opencode_free_model_ids,
     get_verified_opencode_free_model_ids,
     opencode_model_api_mode,
@@ -49,6 +50,8 @@ _TRANSIENT_STATUS_CODES = frozenset({408, 425, 429})
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 MAX_DISCOVERED_MODELS = 1000
 MAX_PROBE_CANDIDATES = min(32, OPENCODE_FREE_CATALOG_MAX_MODELS)
+MAX_PROBE_ATTEMPTS = 2
+PROBE_RETRY_DELAY_SECONDS = 1.0
 
 
 def _headers() -> dict[str, str]:
@@ -165,7 +168,9 @@ def probe_anonymous_model(base_url: str, model_id: str, *, timeout: float) -> st
         payload = {
             "model": model_id,
             "messages": [{"role": "user", "content": "ping"}],
-            "max_tokens": 1,
+            # Reasoning-capable chat models may spend the first tokens on
+            # hidden reasoning; leave enough room to prove visible assistant text.
+            "max_tokens": 256,
             "stream": False,
         }
     body = json.dumps(payload).encode("utf-8")
@@ -175,9 +180,20 @@ def probe_anonymous_model(base_url: str, model_id: str, *, timeout: float) -> st
         headers=_headers(),
         method="POST",
     )
-    outcome, _status, payload = _request_json(request, timeout=timeout)
-    if outcome != "success" or not isinstance(payload, dict) or payload.get("error"):
+    outcome, status, payload = _request_json(request, timeout=timeout)
+    if outcome != "success" or not isinstance(payload, dict):
+        # Responses-only models may reject the non-streaming shape with a
+        # definitive 4xx even though their streaming endpoint is healthy.
+        if mode == "codex_responses" and status in (400, 404, 405, 422):
+            return probe_responses_stream(base_url, model_id, timeout=timeout)
         return "definitive" if outcome == "success" else outcome
+    if payload.get("error"):
+        # Some Responses-only relays return HTTP 200 with an error envelope
+        # for the non-streaming shape. The runtime uses streaming, so probe
+        # that wire before rejecting the model.
+        if mode == "codex_responses":
+            return probe_responses_stream(base_url, model_id, timeout=timeout)
+        return "definitive"
     if mode == "codex_responses":
         response_id = payload.get("id")
         output = payload.get("output")
@@ -200,7 +216,7 @@ def probe_anonymous_model(base_url: str, model_id: str, *, timeout: float) -> st
         )
         if isinstance(response_id, str) and response_id.strip() and valid_output:
             return "success"
-        return "definitive"
+        return probe_responses_stream(base_url, model_id, timeout=timeout)
     choices = payload.get("choices")
     if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
         return "definitive"
@@ -212,6 +228,78 @@ def probe_anonymous_model(base_url: str, model_id: str, *, timeout: float) -> st
     if role != "assistant" or not (isinstance(content, str) and content.strip()):
         return "definitive"
     return "success"
+
+
+def probe_responses_stream(base_url: str, model_id: str, *, timeout: float) -> str:
+    """Check the streaming Responses wire used by the runtime.
+
+    Some relay models return an empty non-streaming envelope but emit real
+    assistant text on the streaming endpoint. Require text plus a terminal
+    response.completed event before accepting the model.
+    """
+    request = urllib.request.Request(
+        f"{base_url.rstrip('/')}/responses",
+        data=json.dumps({
+            "model": model_id,
+            "input": "Reply OK",
+            "max_output_tokens": 256,
+            "stream": True,
+        }).encode("utf-8"),
+        headers=_headers(),
+        method="POST",
+    )
+    size = 0
+    has_text = False
+    deadline = time.monotonic() + timeout
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            while time.monotonic() < deadline:
+                raw = response.readline(MAX_RESPONSE_BYTES - size + 1)
+                if not raw:
+                    break
+                size += len(raw)
+                if size > MAX_RESPONSE_BYTES:
+                    return "definitive"
+                if not raw.startswith(b"data:"):
+                    continue
+                try:
+                    event = json.loads(raw[5:].strip())
+                except (ValueError, UnicodeDecodeError):
+                    continue
+                if not isinstance(event, dict):
+                    continue
+                kind = event.get("type")
+                if kind == "response.output_text.delta":
+                    delta = event.get("delta")
+                    has_text |= isinstance(delta, str) and bool(delta.strip())
+                if kind in ("error", "response.failed", "response.incomplete"):
+                    return "definitive"
+                if kind == "response.completed":
+                    return "success" if has_text else "definitive"
+        return "transient"
+    except urllib.error.HTTPError as exc:
+        return "transient" if _is_transient_status(exc.code) else "definitive"
+    except (urllib.error.URLError, TimeoutError, OSError):
+        return "transient"
+
+
+def probe_candidate_with_retries(
+    base_url: str, model_id: str, *, timeout: float, attempts: int = MAX_PROBE_ATTEMPTS
+) -> str:
+    """Retry only inconclusive provider failures before excluding a candidate.
+
+    A transient timeout/429 is not proof that a free promotion ended. Keep the
+    retry bounded so the daily job cannot loop or turn a provider outage into a
+    large request burst; definitive rejects still stop immediately.
+    """
+    bounded_attempts = max(1, min(int(attempts), MAX_PROBE_ATTEMPTS))
+    outcome = "transient"
+    for attempt in range(bounded_attempts):
+        outcome = probe_anonymous_model(base_url, model_id, timeout=timeout)
+        if outcome != "transient" or attempt + 1 >= bounded_attempts:
+            return outcome
+        time.sleep(PROBE_RETRY_DELAY_SECONDS)
+    return outcome
 
 
 def _refresh_picker_cache(models: list[str]) -> None:
@@ -303,18 +391,30 @@ def refresh_catalog(base_url: str = DEFAULT_BASE_URL, *, timeout: float = 10.0) 
     previous_snapshot = get_fresh_opencode_free_catalog_snapshot()
     previous = previous_snapshot[0] if previous_snapshot else []
     previous_verified_at = previous_snapshot[1] if previous_snapshot else None
+    previous_item_verified_at: dict[str, float] = {}
+    if previous:
+        try:
+            with opencode_free_catalog_path().open(encoding="utf-8") as handle:
+                previous_payload = json.load(handle)
+            for item in previous_payload.get("models", []):
+                if isinstance(item, dict) and isinstance(item.get("id"), str):
+                    stamp = item.get("verified_at")
+                    if isinstance(stamp, (int, float)) and not isinstance(stamp, bool) and stamp > 0:
+                        previous_item_verified_at[item["id"].lower()] = float(stamp)
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            previous_item_verified_at = {}
     discovery_outcome, discovered = fetch_open_code_models(normalized_base, timeout=timeout)
     if discovery_outcome != "success":
         if discovery_outcome == "transient" and previous:
             _refresh_picker_cache(previous)
-            return {"status": "retained_transient", "models": len(previous), "nous_models": nous_models, "openrouter_models": openrouter_models}
+            return {"status": "retained_transient", "models": len(previous)}
         if discovery_outcome == "definitive":
             # A malformed or rejected authoritative discovery response proves
             # the old cache cannot remain a managed availability signal.
             clear_verified_opencode_free_catalog()
             clear_opencode_free_discovery_catalog()
-            return {"status": "definitive_discovery_failed", "models": 0, "nous_models": nous_models, "openrouter_models": openrouter_models}
-        return {"status": "unavailable", "models": 0, "nous_models": nous_models, "openrouter_models": openrouter_models}
+            return {"status": "definitive_discovery_failed", "models": 0}
+        return {"status": "unavailable", "models": 0}
 
     candidates = conservative_candidates(discovered)
     # Keep advertised free IDs visible as disabled picker rows even when a
@@ -326,7 +426,7 @@ def refresh_catalog(base_url: str = DEFAULT_BASE_URL, *, timeout: float = 10.0) 
     retained_transient: list[str] = []
     previous_by_key = {model.lower(): model for model in previous}
     for model_id in candidates:
-        outcome = probe_anonymous_model(normalized_base, model_id, timeout=timeout)
+        outcome = probe_candidate_with_retries(normalized_base, model_id, timeout=timeout)
         if outcome == "success":
             accepted.append(model_id)
         elif outcome == "transient" and model_id.lower() in previous_by_key:
@@ -335,23 +435,42 @@ def refresh_catalog(base_url: str = DEFAULT_BASE_URL, *, timeout: float = 10.0) 
             retained_transient.append(previous_by_key[model_id.lower()])
 
     if accepted:
-        # One catalog timestamp cannot safely represent new proof alongside a
-        # transient old proof.  Publish only newly verified rows; dropping the
-        # transient subset is conservative and cannot extend its TTL.
+        # Publish newly verified rows and retain rediscovered transient rows
+        # with their original per-model proof timestamps. This keeps a provider
+        # 429/503 from making known-good rows disappear, without extending the
+        # transient rows trust window.
         verified_at = time.time()
+        combined = list(accepted)
+        model_verified_at = {model.lower(): verified_at for model in accepted}
+        accepted_keys = set(model_verified_at)
+        for model_id in retained_transient:
+            key = model_id.lower()
+            if key in accepted_keys:
+                continue
+            combined.append(model_id)
+            model_verified_at[key] = previous_item_verified_at.get(
+                key, previous_verified_at or verified_at
+            )
         write_verified_opencode_free_catalog(
-            accepted, verified_at=verified_at, source=normalized_base
+            combined,
+            verified_at=verified_at,
+            source=normalized_base,
+            model_verified_at=model_verified_at,
         )
-        _refresh_picker_cache(accepted)
-        return {"status": "updated", "models": len(accepted), "nous_models": nous_models, "openrouter_models": openrouter_models}
+        _refresh_picker_cache(combined)
+        return {"status": "updated", "models": len(combined)}
     if retained_transient and previous_verified_at is not None:
         write_verified_opencode_free_catalog(
             retained_transient,
             verified_at=previous_verified_at,
             source=normalized_base,
+            model_verified_at={
+                model.lower(): previous_item_verified_at.get(model.lower(), previous_verified_at)
+                for model in retained_transient
+            },
         )
         _refresh_picker_cache(retained_transient)
-        return {"status": "retained_transient", "models": len(retained_transient), "nous_models": nous_models, "openrouter_models": openrouter_models}
+        return {"status": "retained_transient", "models": len(retained_transient)}
     if not accepted:
         # A complete, definitive empty result must not replace a useful
         # fallback with an empty row.  Once any old verification expires the
@@ -360,14 +479,14 @@ def refresh_catalog(base_url: str = DEFAULT_BASE_URL, *, timeout: float = 10.0) 
         # the old cache is no longer acceptable.  Remove it rather than
         # accidentally extending managed-picker availability until its TTL.
         clear_verified_opencode_free_catalog()
-        return {"status": "no_verified_models", "models": 0, "nous_models": nous_models, "openrouter_models": openrouter_models}
+        return {"status": "no_verified_models", "models": 0}
 
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
-    parser.add_argument("--timeout", type=float, default=45.0)
+    parser.add_argument("--timeout", type=float, default=240.0)
     args = parser.parse_args(argv)
     if args.timeout <= 0:
         parser.error("--timeout must be positive")
